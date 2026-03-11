@@ -1,4 +1,3 @@
-// Header.jsx
 import styles from "./Header.module.css";
 import { useSideBarContext } from "../../contexts/SideBarContext";
 
