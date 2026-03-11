@@ -1,5 +1,5 @@
-import { Routes, Route } from 'react-router-dom';
-import CgpaCalculator from './pages/CgpaCalculator/CgpaCalculator';
+import { Routes, Route } from "react-router-dom";
+import CgpaCalculator from "./pages/CgpaCalculator/CgpaCalculator";
 
 function App() {
   return (
@@ -8,4 +8,5 @@ function App() {
     </Routes>
   );
 }
+
 export default App;
