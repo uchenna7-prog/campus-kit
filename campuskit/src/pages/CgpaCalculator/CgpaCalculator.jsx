@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from "react";
+import { useState, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import SideBar from "../../components/Sidebar/Sidebar";
 import Header from "../../components/Header/Header";
@@ -37,14 +37,14 @@ const newSemester = (year, sem) => ({
 
 function CgpaCalculator() {
   const navigate = useNavigate();
-  // Initialize with one semester so the page isn't empty
   const [semesters, setSemesters] = useState([newSemester(1, 1)]);
   const [cgpa, setCgpa] = useState(null);
-  const semesterRefs = useRef({});
+  const [cgpaError, setCgpaError] = useState(false);
+  const cgpaCardRef = useRef(null);
 
   const honours = getHonours(cgpa);
 
-  // ── Handlers ──
+  // ── Semester Actions ──
   const addSemester = () => {
     setSemesters((prev) => {
       const last = prev[prev.length - 1];
@@ -52,6 +52,36 @@ function CgpaCalculator() {
       const nextYear = last.semesterNum === 2 ? last.year + 1 : last.year;
       return [...prev, newSemester(nextYear, nextNum)];
     });
+  };
+
+  const removeSemester = () => {
+    setSemesters((prev) => (prev.length > 1 ? prev.slice(0, -1) : prev));
+  };
+
+  // ── Course Actions ──
+  const addCourse = (semId) => {
+    setSemesters((prev) =>
+      prev.map((s) =>
+        s.id === semId ? { ...s, courses: [...s.courses, newCourse()] } : s
+      )
+    );
+  };
+
+  const deleteCourse = (semId, courseId) => {
+    setSemesters((prev) =>
+      prev.map((s) =>
+        s.id === semId
+          ? { ...s, courses: s.courses.filter((c) => c.id !== courseId) }
+          : s
+      )
+    );
+  };
+
+  const deleteAllCourses = (semId) => {
+    if (!window.confirm("Delete all courses in this semester?")) return;
+    setSemesters((prev) =>
+      prev.map((s) => (s.id === semId ? { ...s, courses: [] } : s))
+    );
   };
 
   const updateCourse = (semId, courseId, field, val) => {
@@ -69,23 +99,72 @@ function CgpaCalculator() {
     );
   };
 
-  const calculateCGPA = () => {
-    let totalWeightedPoints = 0;
-    let totalUnits = 0;
-
-    semesters.forEach((s) => {
-      s.courses.forEach((c) => {
-        const units = Number(c.unit) || 0;
-        totalUnits += units;
-        totalWeightedPoints += units * gradePoint(c.grade);
-      });
-    });
-
-    if (totalUnits > 0) {
-      setCgpa(totalWeightedPoints / totalUnits);
-    }
+  // ── GPA per semester ──
+  const calculateGPA = (semId) => {
+    setSemesters((prev) =>
+      prev.map((s) => {
+        if (s.id !== semId) return s;
+        if (s.courses.length === 0) return { ...s, gpa: null };
+        const totalUnits = s.courses.reduce((acc, c) => acc + (Number(c.unit) || 0), 0);
+        const hasInvalid = s.courses.some(
+          (c) => !c.unit || isNaN(Number(c.unit)) || Number(c.unit) <= 0
+        );
+        if (hasInvalid || totalUnits === 0) return { ...s, gpa: "error" };
+        const weighted = s.courses.reduce(
+          (acc, c) => acc + (Number(c.unit) || 0) * gradePoint(c.grade),
+          0
+        );
+        return { ...s, gpa: weighted / totalUnits };
+      })
+    );
   };
 
+  // ── CGPA ──
+  const calculateCGPA = () => {
+    setCgpaError(false);
+    let valid = true;
+
+    for (const s of semesters) {
+      if (s.courses.length === 0) continue;
+      const totalUnits = s.courses.reduce((acc, c) => acc + (Number(c.unit) || 0), 0);
+      const hasInvalid = s.courses.some(
+        (c) => !c.unit || isNaN(Number(c.unit)) || Number(c.unit) <= 0
+      );
+      if (hasInvalid || totalUnits === 0) {
+        valid = false;
+        break;
+      }
+    }
+
+    if (!valid) {
+      setCgpa(null);
+      setCgpaError(true);
+      alert("Please fill all course units with valid numbers first.");
+      return;
+    }
+
+    const validSems = semesters.filter((s) => s.courses.length > 0);
+    if (validSems.length === 0) { setCgpa(null); return; }
+
+    const totalUnitsAll = validSems.reduce(
+      (acc, s) => acc + s.courses.reduce((a, c) => a + (Number(c.unit) || 0), 0),
+      0
+    );
+    const weightedAll = validSems.reduce(
+      (acc, s) =>
+        acc + s.courses.reduce((a, c) => a + (Number(c.unit) || 0) * gradePoint(c.grade), 0),
+      0
+    );
+
+    if (totalUnitsAll === 0) { setCgpa(null); return; }
+    setCgpa(weightedAll / totalUnitsAll);
+
+    setTimeout(() => {
+      cgpaCardRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }, 50);
+  };
+
+  // ── Group by year ──
   const byYear = semesters.reduce((acc, s) => {
     if (!acc[s.year]) acc[s.year] = [];
     acc[s.year].push(s);
@@ -99,6 +178,8 @@ function CgpaCalculator() {
         <Header />
         <main className={styles.mainContent}>
           <div className={styles.page}>
+
+            {/* Page Header */}
             <div className={styles.pageHeader}>
               <div className={styles.pageEyebrow}>CGPA Suite</div>
               <h1 className={styles.pageTitle}>
@@ -106,8 +187,9 @@ function CgpaCalculator() {
               </h1>
             </div>
 
+            {/* CGPA Result Card */}
             {cgpa !== null && (
-              <div className={styles.cgpaResultCard}>
+              <div className={styles.cgpaResultCard} ref={cgpaCardRef}>
                 <div className={styles.cgpaResultLeft}>
                   <div className={styles.cgpaResultLabel}>Cumulative GPA</div>
                   <div className={styles.cgpaResultValue}>{cgpa.toFixed(2)}</div>
@@ -117,73 +199,195 @@ function CgpaCalculator() {
               </div>
             )}
 
-            {Object.entries(byYear).map(([year, yearSemesters]) => (
+            {/* Semesters by Year */}
+            {Object.entries(byYear).map(([year, yearSems]) => (
               <div key={year} className={styles.yearBlock}>
                 <div className={styles.yearLabel}>Year {year}</div>
-                {yearSemesters.map((sem) => (
-                  <div key={sem.id} className={styles.semesterCard}>
-                    <div className={styles.semesterHeader}>
-                      <span className={styles.semesterTitle}>
-                        {SEMESTER_NAMES[sem.semesterNum]} Semester
-                      </span>
+
+                {yearSems.map((sem) => {
+                  const totalUnits = sem.courses.reduce(
+                    (acc, c) => acc + (Number(c.unit) || 0),
+                    0
+                  );
+                  const weightedTotal = sem.courses.reduce(
+                    (acc, c) => acc + (Number(c.unit) || 0) * gradePoint(c.grade),
+                    0
+                  );
+                  const gpaVisible = sem.gpa !== null && sem.gpa !== "error";
+                  const gpaError = sem.gpa === "error";
+
+                  return (
+                    <div key={sem.id} className={styles.semesterCard}>
+                      {/* Semester Header */}
+                      <div className={styles.semesterHeader}>
+                        <span className={styles.semesterTitle}>
+                          {SEMESTER_NAMES[sem.semesterNum]} Semester
+                        </span>
+                        <span
+                          className={`${styles.semesterGpaPill}${gpaVisible ? ` ${styles.visible}` : ""}${gpaError ? ` ${styles.error}` : ""}`}
+                        >
+                          {gpaError
+                            ? "Check inputs"
+                            : gpaVisible
+                            ? `GPA: ${sem.gpa.toFixed(2)}`
+                            : ""}
+                        </span>
+                      </div>
+
+                      {/* Courses Table */}
+                      <div className={styles.coursesTableWrap}>
+                        {sem.courses.length > 0 ? (
+                          <table className={styles.coursesTable}>
+                            <thead>
+                              <tr>
+                                <th style={{ width: "36px", textAlign: "center" }}>S/N</th>
+                                <th>CODE</th>
+                                <th style={{ width: "64px", textAlign: "center" }}>UNITS</th>
+                                <th style={{ width: "58px", textAlign: "center" }}>GRADE</th>
+                                <th style={{ width: "50px", textAlign: "center" }}>TCU</th>
+                                <th style={{ width: "32px" }}></th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {sem.courses.map((c, idx) => (
+                                <tr key={c.id}>
+                                  <td className={styles.cellSn}>{idx + 1}</td>
+                                  <td>
+                                    <input
+                                      className={styles.cellInput}
+                                      type="text"
+                                      placeholder="e.g. ENG 301"
+                                      value={c.code}
+                                      onChange={(e) => {
+                                        const upper = e.target.value.toUpperCase();
+                                        updateCourse(sem.id, c.id, "code", upper);
+                                      }}
+                                    />
+                                  </td>
+                                  <td>
+                                    <input
+                                      className={styles.cellInput}
+                                      type="number"
+                                      min="1"
+                                      max="6"
+                                      placeholder="e.g. 1"
+                                      value={c.unit}
+                                      onChange={(e) =>
+                                        updateCourse(sem.id, c.id, "unit", e.target.value)
+                                      }
+                                    />
+                                  </td>
+                                  <td>
+                                    <select
+                                      className={styles.cellSelect}
+                                      value={c.grade}
+                                      onChange={(e) =>
+                                        updateCourse(sem.id, c.id, "grade", e.target.value)
+                                      }
+                                    >
+                                      {AVAILABLE_GRADES.map((g) => (
+                                        <option key={g} value={g}>{g}</option>
+                                      ))}
+                                    </select>
+                                  </td>
+                                  <td className={styles.cellTcu}>
+                                    {(Number(c.unit) || 0) * gradePoint(c.grade)}
+                                  </td>
+                                  <td className={styles.cellDel}>
+                                    <button
+                                      className={styles.deleteRowBtn}
+                                      onClick={() => deleteCourse(sem.id, c.id)}
+                                      title="Remove course"
+                                    >
+                                      <i className="fa-solid fa-xmark"></i>
+                                    </button>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                            <tfoot>
+                              <tr className={styles.summaryRow}>
+                                <td colSpan={2} style={{ textAlign: "left" }}>TOTAL</td>
+                                <td style={{ textAlign: "left" }}><strong>{totalUnits}</strong></td>
+                                <td></td>
+                                <td style={{ textAlign: "center" }}><strong>{weightedTotal}</strong></td>
+                                <td></td>
+                              </tr>
+                            </tfoot>
+                          </table>
+                        ) : (
+                          <div className={styles.noCourses}>
+                            <i className="fa-regular fa-circle-dot"></i> No courses added yet.
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Semester Controls */}
+                      <div className={styles.semesterControls}>
+                        <button
+                          className={`${styles.btn} ${styles.btnAddCourse}`}
+                          onClick={() => addCourse(sem.id)}
+                        >
+                          <i className="fa-solid fa-plus"></i> Add Course
+                        </button>
+                        <button
+                          className={`${styles.btn} ${styles.btnDeleteAll}`}
+                          onClick={() => deleteAllCourses(sem.id)}
+                        >
+                          <i className="fa-solid fa-trash"></i> Delete All
+                        </button>
+                        <button
+                          className={`${styles.btn} ${styles.btnCalcGpa}`}
+                          onClick={() => calculateGPA(sem.id)}
+                        >
+                          <i className="fa-solid fa-equals"></i> Calculate GPA
+                        </button>
+                      </div>
                     </div>
-                    <div className={styles.coursesTableWrap}>
-                      <table className={styles.coursesTable}>
-                        <thead>
-                          <tr>
-                            <th>S/N</th>
-                            <th>CODE</th>
-                            <th>UNITS</th>
-                            <th>GRADE</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {sem.courses.map((c, idx) => (
-                            <tr key={c.id}>
-                              <td className={styles.cellSn}>{idx + 1}</td>
-                              <td>
-                                <input
-                                  className={styles.cellInput}
-                                  value={c.code}
-                                  onChange={(e) => updateCourse(sem.id, c.id, "code", e.target.value)}
-                                />
-                              </td>
-                              <td>
-                                <input
-                                  className={styles.cellInput}
-                                  type="number"
-                                  value={c.unit}
-                                  onChange={(e) => updateCourse(sem.id, c.id, "unit", e.target.value)}
-                                />
-                              </td>
-                              <td>
-                                <select
-                                  className={styles.cellSelect}
-                                  value={c.grade}
-                                  onChange={(e) => updateCourse(sem.id, c.id, "grade", e.target.value)}
-                                >
-                                  {AVAILABLE_GRADES.map((g) => (
-                                    <option key={g} value={g}>{g}</option>
-                                  ))}
-                                </select>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             ))}
 
-            <div className={styles.cgpaControls}>
-              <button className={styles.btn} onClick={addSemester}>Add Semester</button>
-              <button className={styles.btn} onClick={calculateCGPA}>Calculate CGPA</button>
+            {/* CGPA Controls */}
+            <div className={styles.cgpaControlsWrap}>
+              <div className={styles.cgpaControlsLabel}>Manage Semesters</div>
+              <div className={styles.cgpaControls}>
+                <button
+                  className={`${styles.btn} ${styles.btnAddSem}`}
+                  onClick={addSemester}
+                >
+                  <i className="fa-solid fa-plus"></i> Add Semester
+                </button>
+                <button
+                  className={`${styles.btn} ${styles.btnRemoveSem}`}
+                  onClick={removeSemester}
+                  disabled={semesters.length <= 1}
+                >
+                  <i className="fa-solid fa-minus"></i> Remove Last
+                </button>
+                <button
+                  className={`${styles.btn} ${styles.btnCalcCgpa}`}
+                  onClick={calculateCGPA}
+                >
+                  <i className="fa-solid fa-chart-simple"></i> Calculate CGPA
+                </button>
+              </div>
             </div>
+
           </div>
         </main>
       </div>
+
+      {/* Floating Summary Button */}
+      <button
+        className={styles.floatBtn}
+        title="View Summary"
+        onClick={() => navigate("/cgpa-summary")}
+      >
+        <i className="fa-solid fa-chart-pie"></i>
+        <span>SUMMARY</span>
+      </button>
     </div>
   );
 }
