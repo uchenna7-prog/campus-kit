@@ -1,10 +1,13 @@
 import { Routes, Route } from "react-router-dom";
-import CgpaCalculator from "./pages/CgpaCalculator/CgpaCalculator";
+
+function Test() {
+  return <h1 style={{padding:40}}>CampusKit is working</h1>;
+}
 
 function App() {
   return (
     <Routes>
-      <Route path="/" element={<CgpaCalculator />} />
+      <Route path="/" element={<Test />} />
     </Routes>
   );
 }
