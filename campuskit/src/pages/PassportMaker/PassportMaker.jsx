@@ -27,12 +27,6 @@ const BG_SWATCHES = [
   { c: "#f4f4f2", dark: false, border: true },
 ];
 
-function formatBytes(b) {
-  return b > 1048576 ? (b / 1048576).toFixed(1) + "MB" : (b / 1024).toFixed(0) + "KB";
-}
-function delay(ms) {
-  return new Promise((r) => setTimeout(r, ms));
-}
 function drawChecker(ctx, w, h, size = 10) {
   for (let y = 0; y < h; y += size)
     for (let x = 0; x < w; x += size) {
@@ -40,6 +34,9 @@ function drawChecker(ctx, w, h, size = 10) {
       ctx.fillRect(x, y, size, size);
     }
 }
+
+// ── Remove.bg API key — replace with your key or load from env ──
+const REMOVEBG_API_KEY = import.meta.env.VITE_REMOVEBG_API_KEY ?? "";
 
 // ── Component ──────────────────────────────────────────────────
 function PassportMaker() {
@@ -51,8 +48,12 @@ function PassportMaker() {
 
   // ── Processing state
   const [progress, setProgress] = useState(0);
-  const [pTitle, setPTitle] = useState("Loading AI model…");
-  const [pSub, setPSub] = useState("Runs entirely in your browser. First load downloads the model.");
+  const [pTitle, setPTitle] = useState("Removing background…");
+  const [pSub, setPSub] = useState("Sending to Remove.bg — usually done in 1–2 seconds.");
+
+  // ── API key state (user can paste key in-app if env var not set)
+  const [apiKey, setApiKey] = useState(REMOVEBG_API_KEY);
+  const [showApiInput, setShowApiInput] = useState(!REMOVEBG_API_KEY);
 
   // ── Editor state
   const [showBg, setShowBg] = useState(false);
@@ -72,7 +73,6 @@ function PassportMaker() {
   const previewCanvasRef = useRef(null);
   const workCanvasRef = useRef(null);
   const outputCardRef = useRef(null);
-  const pipeRef = useRef(null);
   const origImgRef = useRef(null);
   const fgCanvasRef = useRef(null);
   const urlRef = useRef(null);
@@ -84,12 +84,6 @@ function PassportMaker() {
     if (n === 1) setStep("upload");
     if (n === 2) setStep("processing");
     if (n === 3) setStep("editor");
-  }
-
-  function setP(pct, title, sub) {
-    setProgress(pct);
-    setPTitle(title);
-    setPSub(sub);
   }
 
   // ── Render preview canvas ─────────────────────────────────────
@@ -131,16 +125,16 @@ function PassportMaker() {
   // ── Upload handling ───────────────────────────────────────────
   function handleFileChange(file) {
     if (!file) return;
+    // Store original image for fallback canvas
     const r = new FileReader();
     r.onload = (e) => {
       const img = new Image();
-      img.onload = () => {
-        origImgRef.current = img;
-        doRemoval();
-      };
+      img.onload = () => { origImgRef.current = img; };
       img.src = e.target.result;
     };
     r.readAsDataURL(file);
+    // Kick off removal immediately with the raw File object
+    doRemoval(file);
   }
 
   // ── Drag and drop ─────────────────────────────────────────────
@@ -157,89 +151,71 @@ function PassportMaker() {
     if (e.dataTransfer.files[0]) handleFileChange(e.dataTransfer.files[0]);
   }
 
-  // ── Background removal ────────────────────────────────────────
-  async function doRemoval() {
-    goStep(2);
-    try {
-      const { pipeline, env } = await import(
-        "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.1.2/dist/transformers.min.js"
-      );
-      env.allowLocalModels = false;
+  // ── Background removal via Remove.bg API ─────────────────────
+  async function doRemoval(file) {
+    const key = apiKey.trim();
+    if (!key) {
+      setShowApiInput(true);
+      return;
+    }
 
-      if (!pipeRef.current) {
-        setP(5, "Loading AI model…", "Downloading once, runs offline after that");
-        pipeRef.current = await pipeline(
-          "image-segmentation",
-          "Xenova/segformer-b2-finetuned-ade-512-512",
-          {
-            progress_callback: (p) => {
-              if (p.status === "downloading") {
-                const pct = p.total ? Math.round((p.loaded / p.total) * 60) : 10;
-                setP(pct, "Downloading model…", formatBytes(p.loaded || 0));
-              }
-            },
-          }
-        );
+    goStep(2);
+    setProgress(20);
+    setPTitle("Removing background…");
+    setPSub("Sending photo to Remove.bg — usually done in 1–2 seconds.");
+
+    try {
+      const formData = new FormData();
+      formData.append("image_file", file);
+      formData.append("size", "auto");
+
+      setProgress(50);
+
+      const res = await fetch("https://api.remove.bg/v1.0/removebg", {
+        method: "POST",
+        headers: { "X-Api-Key": key },
+        body: formData,
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err?.errors?.[0]?.title ?? `Remove.bg error ${res.status}`);
       }
 
-      setP(65, "Analysing photo…", "Finding person in image");
-      const result = await pipeRef.current(origImgRef.current.src);
-      setP(85, "Removing background…", "Applying segmentation mask");
-      fgCanvasRef.current = buildFgCanvas(result);
-      setP(100, "Done!", "");
-      await delay(350);
-      setPreviewSub("Background removed");
-      goStep(3);
+      setProgress(85);
+      setPTitle("Finalising…");
+
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const img = new Image();
+      img.onload = () => {
+        // Draw the transparent PNG onto a canvas for further processing
+        const c = document.createElement("canvas");
+        c.width = img.naturalWidth;
+        c.height = img.naturalHeight;
+        c.getContext("2d").drawImage(img, 0, 0);
+        fgCanvasRef.current = c;
+        setProgress(100);
+        setPTitle("Done!");
+        setPSub("");
+        setTimeout(() => {
+          setPreviewSub("Background removed");
+          goStep(3);
+        }, 300);
+      };
+      img.src = url;
     } catch (err) {
-      console.warn("Segmentation failed, using original:", err);
-      const c = document.createElement("canvas");
+      console.error("Remove.bg failed:", err);
+      // Fallback: use original image, show error
       const orig = origImgRef.current;
+      const c = document.createElement("canvas");
       c.width = orig.naturalWidth;
       c.height = orig.naturalHeight;
       c.getContext("2d").drawImage(orig, 0, 0);
       fgCanvasRef.current = c;
-      setPreviewSub("Background removal failed — choose a colour to overlay");
+      setPreviewSub(`BG removal failed: ${err.message}`);
       goStep(3);
     }
-  }
-
-  function buildFgCanvas(segments) {
-    const orig = origImgRef.current;
-    const c = document.createElement("canvas");
-    c.width = orig.naturalWidth;
-    c.height = orig.naturalHeight;
-    const ctx = c.getContext("2d");
-    ctx.drawImage(orig, 0, 0);
-
-    const fg =
-      segments.find(
-        (s) => s.label === "person" || s.label === "skin" || s.label === "hair"
-      ) ||
-      segments.reduce(
-        (a, b) => ((a.score || 0) > (b.score || 0) ? a : b),
-        segments[0]
-      );
-
-    if (!fg || !fg.mask) return c;
-
-    const imgData = ctx.getImageData(0, 0, c.width, c.height);
-    const mCanvas = document.createElement("canvas");
-    mCanvas.width = fg.mask.width;
-    mCanvas.height = fg.mask.height;
-    mCanvas.getContext("2d").putImageData(fg.mask, 0, 0);
-
-    const scaled = document.createElement("canvas");
-    scaled.width = c.width;
-    scaled.height = c.height;
-    const sCtx = scaled.getContext("2d");
-    sCtx.drawImage(mCanvas, 0, 0, c.width, c.height);
-    const maskData = sCtx.getImageData(0, 0, c.width, c.height);
-
-    for (let i = 0; i < imgData.data.length; i += 4) {
-      imgData.data[i + 3] = maskData.data[i];
-    }
-    ctx.putImageData(imgData, 0, 0);
-    return c;
   }
 
   // ── Generate sheet ────────────────────────────────────────────
@@ -340,6 +316,9 @@ function PassportMaker() {
     setCustomColor("#ffffff");
     setPreset("ng");
     setQty(4);
+    setProgress(0);
+    setPTitle("Removing background…");
+    setPSub("Sending to Remove.bg — usually done in 1–2 seconds.");
     goStep(1);
   }
 
@@ -393,7 +372,48 @@ function PassportMaker() {
 
             {/* ── Step 1: Upload ── */}
             {step === "upload" && (
-              <div className={styles.card} style={{ animation: "rise .4s .06s ease both" }}>
+              <>
+                {/* API key banner */}
+                {showApiInput && (
+                  <div className={styles.apiBanner}>
+                    <div className={styles.apiBannerIcon}>
+                      <i className="fa-solid fa-key"></i>
+                    </div>
+                    <div className={styles.apiBannerBody}>
+                      <div className={styles.apiBannerTitle}>Remove.bg API Key Required</div>
+                      <div className={styles.apiBannerSub}>
+                        Free at{" "}
+                        <a href="https://www.remove.bg/api" target="_blank" rel="noreferrer">
+                          remove.bg/api
+                        </a>{" "}
+                        · 50 free uses/month · or set{" "}
+                        <code>VITE_REMOVEBG_API_KEY</code> in your <code>.env</code>
+                      </div>
+                      <div className={styles.apiBannerRow}>
+                        <input
+                          className={styles.apiInput}
+                          type="password"
+                          placeholder="Paste your API key here…"
+                          value={apiKey}
+                          onChange={(e) => setApiKey(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" && apiKey.trim()) setShowApiInput(false);
+                          }}
+                        />
+                        <button
+                          className={`${styles.btn} ${styles.primary}`}
+                          style={{ flex: 0, whiteSpace: "nowrap" }}
+                          disabled={!apiKey.trim()}
+                          onClick={() => setShowApiInput(false)}
+                        >
+                          Save Key
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                <div className={styles.card} style={{ animation: "rise .4s .06s ease both" }}>
                 <div className={styles.cardHeader}>
                   <div>
                     <div className={styles.cardTitle}>Upload Your Photo</div>
@@ -436,6 +456,7 @@ function PassportMaker() {
                   onChange={(e) => handleFileChange(e.target.files[0])}
                 />
               </div>
+            </>
             )}
 
             {/* ── Step 2: Processing ── */}
