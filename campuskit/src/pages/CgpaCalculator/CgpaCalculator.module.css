@@ -1,1 +1,271 @@
-...
+.homeContainer {
+  display: flex;
+  min-height: 100vh;
+  background: #f7f7f5;
+  color: #1a1a18;
+}
+
+.mainWrapper {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.mainContent {
+  flex: 1;
+  padding-top: 56px; /* Topbar height */
+  overflow-y: auto;
+}
+
+.page {
+  padding: 24px 24px 120px;
+  max-width: 820px;
+  margin: 0 auto;
+}
+
+/* Page Header */
+.pageHeader {
+  margin-bottom: 24px;
+}
+
+.pageEyebrow {
+  font-size: 10.5px;
+  font-weight: 600;
+  color: #9a9a94;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin-bottom: 4px;
+}
+
+.pageTitle {
+  font-family: 'Instrument Serif', serif;
+  font-size: clamp(1.4rem, 3vw, 1.8rem);
+  font-weight: 400;
+  color: #0f0f0e;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+}
+
+.pageTitle em {
+  font-style: italic;
+  color: #9a9a94;
+}
+
+/* CGPA Result Card */
+.cgpaResultCard {
+  background: #0f0f0e;
+  color: #ffffff;
+  border-radius: 14px;
+  padding: 20px 22px;
+  margin-bottom: 24px;
+  display: none;
+  align-items: center;
+  gap: 16px;
+}
+
+.cgpaResultCard.visible {
+  display: flex;
+}
+
+.cgpaResultLeft {
+  flex: 1;
+}
+
+.cgpaResultLabel {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.45);
+  margin-bottom: 4px;
+}
+
+.cgpaResultValue {
+  font-family: 'Instrument Serif', serif;
+  font-size: 2.4rem;
+  font-weight: 400;
+  line-height: 1;
+  letter-spacing: -0.02em;
+}
+
+.cgpaHonours {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.6);
+  margin-top: 4px;
+}
+
+.cgpaEmoji {
+  font-size: 2rem;
+}
+
+/* Year & Semester Layout */
+.yearBlock {
+  margin-bottom: 36px;
+}
+
+.yearLabel {
+  font-family: 'Instrument Serif', serif;
+  font-size: 1.35rem;
+  font-style: italic;
+  font-weight: 400;
+  color: #0f0f0e;
+  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.yearLabel::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: #d0d0cc;
+}
+
+.semesterCard {
+  background: #ffffff;
+  border: 1px solid #e8e8e5;
+  border-radius: 14px;
+  margin-bottom: 14px;
+  overflow: hidden;
+}
+
+.semesterHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid #e8e8e5;
+  background: #f4f4f2;
+}
+
+.semesterTitle {
+  font-size: 12px;
+  font-weight: 600;
+  color: #1a1a18;
+  text-transform: uppercase;
+}
+
+.semesterGpaPill {
+  font-size: 11px;
+  font-weight: 600;
+  background: #1a1a18;
+  color: #ffffff;
+  padding: 3px 10px;
+  border-radius: 20px;
+}
+
+.semesterGpaPill.error {
+  background: #dc2626;
+}
+
+/* Table Styles */
+.coursesTableWrap {
+  overflow-x: auto;
+}
+
+.coursesTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  table-layout: fixed;
+}
+
+.coursesTable th {
+  text-align: left;
+  padding: 8px 10px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: #5c5c58;
+  border-bottom: 2px solid #1a1a18;
+  border-right: 1px solid #d0d0cc;
+  background: #f4f4f2;
+}
+
+.coursesTable td {
+  border-bottom: 1px solid #e8e8e5;
+  border-right: 1px solid #e8e8e5;
+}
+
+.cellInput, .cellSelect {
+  width: 100%;
+  padding: 8px 10px;
+  background: transparent;
+  border: none;
+  outline: none;
+  font-size: 13px;
+  color: #1a1a18;
+}
+
+.cellSn { padding: 8px 10px; color: #9a9a94; text-align: center; width: 40px; }
+.cellTcu { padding: 8px 10px; text-align: center; font-weight: 600; }
+
+.deleteRowBtn {
+  background: none;
+  border: none;
+  color: #d0d0cc;
+  cursor: pointer;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.deleteRowBtn:hover { color: #dc2626; background: #fef2f2; border-radius: 6px; }
+
+.summaryRow td {
+  background: #f4f4f2;
+  padding: 7px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  border-top: 2px solid #d0d0cc;
+}
+
+/* Controls */
+.semesterControls, .cgpaControls {
+  display: flex;
+  gap: 6px;
+  padding: 10px 12px;
+}
+
+.cgpaControlsWrap {
+  background: #ffffff;
+  border: 1px solid #e8e8e5;
+  border-radius: 14px;
+  padding: 16px;
+  margin-top: 8px;
+}
+
+.cgpaControlsLabel {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: #9a9a94;
+  margin-bottom: 12px;
+}
+
+.btn {
+  border: none;
+  padding: 7px 8px;
+  border-radius: 10px;
+  font-weight: 600;
+  font-size: 10.5px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  flex: 1;
+}
+
+.btnAddCourse, .btnAddSem { background: #1a1a18; color: #ffffff; }
+.btnDeleteAll { background: #ffffff; color: #dc2626; border: 1px solid #fecaca; }
+.btnCalcGpa, .btnRemoveSem, .btnCalcCgpa { background: #ffffff; color: #1a1a18; border: 1px solid #d0d0cc; }
+
+@media (max-width: 768px) {
+  .page { padding: 16px 12px 120px; }
+  .coursesTable { font-size: 11px; }
+  .btn { font-size: 9px; padding: 6px 4px; }
+}
