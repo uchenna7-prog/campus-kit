@@ -206,7 +206,7 @@
 
 /* ── Courses Table ── */
 .coursesTableWrap {
-  overflow-x: auto;
+  overflow: visible;
   width: 100%;
 }
 
@@ -217,13 +217,13 @@
   table-layout: fixed;
 }
 
-/* Column widths — CODE gets the remaining space automatically */
+/* Column widths — exactly matching the HTML reference */
+/* CODE column has no width set → gets all remaining space */
 .colSn    { width: 36px; }
-.colCode  { /* flex — takes all remaining width */ }
-.colUnits { width: 68px; }
-.colGrade { width: 68px; }
-.colTcu   { width: 56px; }
-.colDel   { width: 36px; }
+.colUnits { width: 64px; }
+.colGrade { width: 58px; }
+.colTcu   { width: 50px; }
+.colDel   { width: 32px; }
 
 .coursesTable th {
   text-align: left;
@@ -272,6 +272,8 @@
   font-family: 'Geist', sans-serif;
   font-size: 13px;
   color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .cellInput::placeholder {
@@ -563,11 +565,11 @@
   }
 
   /* Tighten fixed columns on mobile so CODE gets more room */
-  .colSn    { width: 28px; }
-  .colUnits { width: 52px; }
-  .colGrade { width: 52px; }
-  .colTcu   { width: 44px; }
-  .colDel   { width: 28px; }
+  .colSn    { width: 26px; }
+  .colUnits { width: 48px; }
+  .colGrade { width: 46px; }
+  .colTcu   { width: 40px; }
+  .colDel   { width: 26px; }
 
   .cellTcu {
     padding: 6px 4px;
