@@ -605,6 +605,85 @@
   gap: 7px;
 }
 
+/* ── API Key Banner ── */
+.apiBanner {
+  display: flex;
+  gap: 12px;
+  background: #fefce8;
+  border: 1px solid #fde047;
+  border-radius: var(--radius-lg);
+  padding: 14px 16px;
+  margin-bottom: 14px;
+  animation: rise 0.3s ease both;
+}
+
+.apiBannerIcon {
+  width: 34px;
+  height: 34px;
+  background: #fef08a;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #a16207;
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+.apiBannerBody {
+  flex: 1;
+  min-width: 0;
+}
+
+.apiBannerTitle {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: #713f12;
+  margin-bottom: 3px;
+}
+
+.apiBannerSub {
+  font-size: 11.5px;
+  color: #92400e;
+  margin-bottom: 10px;
+  line-height: 1.5;
+}
+
+.apiBannerSub a {
+  color: #92400e;
+  text-decoration: underline;
+}
+
+.apiBannerSub code {
+  background: #fef08a;
+  border-radius: 3px;
+  padding: 1px 4px;
+  font-size: 10.5px;
+}
+
+.apiBannerRow {
+  display: flex;
+  gap: 8px;
+}
+
+.apiInput {
+  flex: 1;
+  padding: 7px 10px;
+  border: 1px solid #fde047;
+  border-radius: var(--radius);
+  font-size: 12px;
+  font-family: inherit;
+  background: #fffbeb;
+  color: var(--ink);
+  outline: none;
+  min-width: 0;
+}
+
+.apiInput:focus {
+  border-color: #f59e0b;
+  background: var(--white);
+}
+
 /* ── Animations ── */
 @keyframes rise {
   from { opacity: 0; transform: translateY(8px); }
