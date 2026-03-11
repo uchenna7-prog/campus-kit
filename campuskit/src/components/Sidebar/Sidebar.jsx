@@ -1,6 +1,6 @@
 import { Link, useLocation } from "react-router-dom";
 import styles from "./SideBar.module.css";
-import { useSideBarContext } from "../../contexts/SideBarContext";
+import { useSideBarContext } from "../../contexts/SidebarContext";
 
 export default function SideBar() {
   const { isCollapsed, isMobile, isOpen, toggleSideBar } = useSideBarContext();
