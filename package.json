@@ -1,7 +1,0 @@
-{
-  "dependencies": {
-    "install": "^0.13.0",
-    "react-router-dom": "^7.13.1",
-    "renpm": "^0.0.6"
-  }
-}
