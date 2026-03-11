@@ -42,8 +42,7 @@
 
 .page {
   padding: 24px 24px 120px;
-  max-width: 900px; /* Increased slightly for better table spread */
-  margin: 0 auto;
+  max-width: 820px;
 }
 
 /* ── Page Header ── */
@@ -63,7 +62,7 @@
 
 .pageTitle {
   font-family: 'Instrument Serif', serif;
-  font-size: clamp(1.6rem, 4vw, 2.2rem);
+  font-size: clamp(1.4rem, 3vw, 1.8rem);
   font-weight: 400;
   color: var(--black);
   letter-spacing: -0.02em;
@@ -104,7 +103,7 @@
 
 .cgpaResultValue {
   font-family: 'Instrument Serif', serif;
-  font-size: 2.6rem;
+  font-size: 2.4rem;
   font-weight: 400;
   line-height: 1;
   letter-spacing: -0.02em;
@@ -112,12 +111,12 @@
 }
 
 .cgpaHonours {
-  font-size: 13px;
+  font-size: 12px;
   color: rgba(255, 255, 255, 0.6);
 }
 
 .cgpaEmoji {
-  font-size: 2.2rem;
+  font-size: 2rem;
 }
 
 /* ── Year Block ── */
@@ -126,9 +125,13 @@
   animation: rise 0.4s ease both;
 }
 
+.yearBlock:nth-of-type(1) { animation-delay: 0.05s; }
+.yearBlock:nth-of-type(2) { animation-delay: 0.1s; }
+.yearBlock:nth-of-type(3) { animation-delay: 0.15s; }
+
 .yearLabel {
   font-family: 'Instrument Serif', serif;
-  font-size: 1.4rem;
+  font-size: 1.35rem;
   font-style: italic;
   font-weight: 400;
   letter-spacing: -0.01em;
@@ -156,22 +159,27 @@
   transition: box-shadow 0.15s;
 }
 
-.semesterCard:hover {
-  box-shadow: 0 4px 20px rgba(15, 15, 14, 0.06);
+.semesterCard + .semesterCard {
+  margin-top: 14px;
 }
 
+.semesterCard:hover {
+  box-shadow: 0 2px 16px rgba(15, 15, 14, 0.06);
+}
+
+/* ── Semester Header ── */
 .semesterHeader {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 14px 18px;
+  padding: 12px 16px;
   border-bottom: 1px solid var(--gray-100);
   background: var(--gray-50);
 }
 
 .semesterTitle {
   font-size: 12px;
-  font-weight: 700;
+  font-weight: 600;
   color: var(--ink);
   letter-spacing: 0.02em;
   text-transform: uppercase;
@@ -179,51 +187,61 @@
 
 .semesterGpaPill {
   font-size: 11px;
-  font-weight: 700;
+  font-weight: 600;
   background: var(--ink);
   color: var(--white);
-  padding: 4px 12px;
+  padding: 3px 10px;
   border-radius: 20px;
   display: none;
 }
 
-.semesterGpaPill.visible { display: inline-block; }
-.semesterGpaPill.error { background: #dc2626; display: inline-block; }
+.semesterGpaPill.visible {
+  display: inline-block;
+}
 
-/* ── Table & Column Sizing ── */
+.semesterGpaPill.error {
+  background: #dc2626;
+  display: inline-block;
+}
+
+/* ── Courses Table ── */
 .coursesTableWrap {
   overflow-x: auto;
   width: 100%;
-  -webkit-overflow-scrolling: touch; /* Smooth scroll on iOS */
 }
 
 .coursesTable {
   width: 100%;
   border-collapse: collapse;
   font-size: 13px;
-  table-layout: fixed; /* Enforces strict column widths */
-  min-width: 500px;    /* Prevents table from crushing on mobile */
+  table-layout: fixed;
 }
 
-/* Column Width Definitions */
-.coursesTable th:nth-child(1) { width: 40px; }  /* S/N */
-.coursesTable th:nth-child(2) { width: auto; }  /* CODE - Takes all remaining space */
-.coursesTable th:nth-child(3) { width: 70px; }  /* UNITS */
-.coursesTable th:nth-child(4) { width: 85px; }  /* GRADE */
-.coursesTable th:nth-child(5) { width: 60px; }  /* TCU */
-.coursesTable th:nth-child(6) { width: 45px; }  /* DELETE */
+/* Column widths — CODE gets the remaining space automatically */
+.colSn    { width: 36px; }
+.colCode  { /* flex — takes all remaining width */ }
+.colUnits { width: 68px; }
+.colGrade { width: 68px; }
+.colTcu   { width: 56px; }
+.colDel   { width: 36px; }
 
 .coursesTable th {
   text-align: left;
-  padding: 12px 10px;
+  padding: 8px 10px;
   font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.07em;
   text-transform: uppercase;
   color: var(--gray-600);
   border-bottom: 2px solid var(--ink);
-  border-right: 1px solid var(--gray-100);
+  border-right: 1px solid var(--gray-200);
   background: var(--gray-50);
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.coursesTable th:last-child {
+  border-right: none;
 }
 
 .coursesTable td {
@@ -233,46 +251,79 @@
   vertical-align: middle;
 }
 
-.coursesTable td:last-child, .coursesTable th:last-child {
+.coursesTable td:last-child {
   border-right: none;
+}
+
+.coursesTable tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.coursesTable tbody tr:hover td {
+  background: var(--gray-50);
 }
 
 .cellInput {
   width: 100%;
-  padding: 12px 10px;
+  padding: 8px 10px;
   background: transparent;
   border: none;
   outline: none;
-  font-family: inherit;
+  font-family: 'Geist', sans-serif;
   font-size: 13px;
   color: var(--ink);
+}
+
+.cellInput::placeholder {
+  color: var(--gray-200);
 }
 
 .cellSelect {
   width: 100%;
-  padding: 12px 10px;
+  padding: 8px 10px;
   background: transparent;
   border: none;
   outline: none;
-  font-family: inherit;
+  font-family: 'Geist', sans-serif;
   font-size: 13px;
   color: var(--ink);
   cursor: pointer;
+  appearance: none;
 }
 
-.cellSn { text-align: center; color: var(--gray-400); }
-.cellTcu { text-align: center; font-weight: 700; }
-.cellDel { text-align: center; }
+.cellSn {
+  padding: 8px 10px;
+  color: var(--gray-400);
+  font-size: 12px;
+  width: 40px;
+  text-align: center;
+}
+
+.cellTcu {
+  padding: 8px 10px;
+  text-align: center;
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.cellDel {
+  padding: 4px 8px;
+  width: 38px;
+}
 
 .deleteRowBtn {
   background: none;
   border: none;
   color: var(--gray-300);
-  width: 32px;
-  height: 32px;
-  border-radius: 8px;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: background 0.13s, color 0.13s;
 }
 
 .deleteRowBtn:hover {
@@ -280,68 +331,158 @@
   color: #dc2626;
 }
 
+/* ── Summary Footer Row ── */
 .summaryRow td {
   background: var(--gray-50);
-  padding: 10px;
+  padding: 7px 10px;
   font-size: 12px;
-  font-weight: 700;
+  font-weight: 600;
   color: var(--ink);
-  border-top: 2px solid var(--gray-200);
+  border-top: 2px solid var(--gray-200) !important;
 }
 
-/* ── Buttons & Controls ── */
+/* ── Empty State ── */
+.noCourses {
+  padding: 14px 12px;
+  font-size: 12.5px;
+  color: var(--gray-400);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.noCourses i {
+  font-size: 11px;
+}
+
+/* ── Semester Controls ── */
 .semesterControls {
   display: flex;
-  gap: 8px;
-  padding: 12px;
-  background: var(--white);
+  flex-direction: row;
+  gap: 6px;
+  padding: 10px 12px;
   border-top: 1px solid var(--gray-100);
+  overflow: visible;
 }
 
+/* ── Buttons ── */
 .btn {
   border: none;
-  padding: 10px 14px;
+  padding: 7px 8px;
   border-radius: var(--radius);
-  font-weight: 700;
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
+  font-weight: 600;
+  font-size: 10.5px;
+  letter-spacing: 0.02em;
   cursor: pointer;
+  transition: opacity 0.15s, transform 0.1s;
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
+  gap: 4px;
+  white-space: nowrap;
   flex: 1;
-  transition: transform 0.1s, opacity 0.2s;
+  min-width: 0;
+  font-family: inherit;
 }
 
-.btn:active { transform: scale(0.98); }
+.btn:hover {
+  opacity: 0.88;
+}
 
-.btnAddCourse { background: var(--ink); color: var(--white); }
-.btnDeleteAll { background: #fff; color: #dc2626; border: 1px solid #fecaca; }
-.btnCalcGpa { background: #fff; color: var(--ink); border: 1px solid var(--gray-200); }
+.btn:active {
+  transform: scale(0.97);
+}
 
+.btnAddCourse {
+  background: var(--ink);
+  color: var(--white);
+}
+
+.btnDeleteAll {
+  background: var(--white);
+  color: #dc2626;
+  border: 1px solid #fecaca;
+}
+
+.btnDeleteAll:hover {
+  background: #fef2f2;
+  opacity: 1;
+}
+
+.btnCalcGpa {
+  background: var(--white);
+  color: var(--ink);
+  border: 1px solid var(--gray-200);
+}
+
+.btnCalcGpa:hover {
+  background: var(--gray-50);
+  opacity: 1;
+}
+
+/* ── CGPA Controls Wrap ── */
 .cgpaControlsWrap {
   background: var(--white);
   border: 1px solid var(--gray-100);
   border-radius: var(--radius-lg);
-  padding: 20px;
-  margin-top: 10px;
+  padding: 16px;
+  margin-top: 8px;
+  animation: rise 0.4s 0.1s ease both;
 }
 
-.cgpaControls { display: flex; gap: 10px; }
-.btnAddSem { background: var(--ink); color: var(--white); }
-.btnRemoveSem { background: #fff; color: var(--gray-600); border: 1px solid var(--gray-200); }
-.btnCalcCgpa { background: #fff; color: var(--ink); border: 2px solid var(--ink); }
+.cgpaControlsLabel {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--gray-400);
+  margin-bottom: 12px;
+}
 
-/* ── Floating Summary ── */
+.cgpaControls {
+  display: flex;
+  flex-direction: row;
+  gap: 6px;
+  overflow: visible;
+}
+
+.btnAddSem {
+  background: var(--ink);
+  color: var(--white);
+}
+
+.btnRemoveSem {
+  background: var(--white);
+  color: var(--gray-600);
+  border: 1px solid var(--gray-200);
+}
+
+.btnRemoveSem:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.btnCalcCgpa {
+  background: var(--white);
+  color: var(--ink);
+  border: 1px solid var(--gray-200);
+  font-weight: 700;
+}
+
+.btnCalcCgpa:hover {
+  background: var(--ink);
+  color: var(--white);
+  opacity: 1;
+}
+
+/* ── Floating Summary Button ── */
 .floatBtn {
   position: fixed;
-  right: 24px;
-  bottom: 24px;
-  width: 60px;
-  height: 60px;
-  border-radius: 18px;
+  right: 20px;
+  bottom: 28px;
+  width: 54px;
+  height: 54px;
+  border-radius: 14px;
   background: var(--ink);
   color: var(--white);
   border: none;
@@ -349,21 +490,118 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 10px 30px rgba(0,0,0,0.2);
-  z-index: 100;
+  gap: 2px;
   cursor: pointer;
+  z-index: 999;
+  box-shadow: 0 4px 20px rgba(15, 15, 14, 0.25);
+  transition: transform 0.15s, box-shadow 0.15s;
+  font-family: inherit;
+}
+
+.floatBtn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 28px rgba(15, 15, 14, 0.3);
+}
+
+.floatBtn i {
+  font-size: 1.2rem;
+}
+
+.floatBtn span {
+  font-size: 7.5px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  color: rgba(255, 255, 255, 0.6);
 }
 
 /* ── Animations ── */
 @keyframes rise {
-  from { opacity: 0; transform: translateY(15px); }
-  to { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
-/* ── Responsive ── */
+/* ── Mobile ── */
 @media (max-width: 768px) {
-  .page { padding: 16px 12px 100px; }
-  .semesterHeader { padding: 12px; }
-  .btn { font-size: 10px; padding: 10px 8px; }
-  .cgpaControls { flex-direction: column; }
+  .page {
+    padding: 16px 12px 120px;
+  }
+
+  .coursesTable {
+    font-size: 11px;
+  }
+
+  .coursesTable th {
+    font-size: 9px;
+    padding: 6px 5px;
+    letter-spacing: 0.03em;
+  }
+
+  .coursesTable td {
+    font-size: 11px;
+  }
+
+  .cellInput {
+    font-size: 11px;
+    padding: 6px 5px;
+  }
+
+  .cellSelect {
+    font-size: 11px;
+    padding: 6px 4px;
+  }
+
+  .cellSn {
+    padding: 6px 4px;
+    font-size: 10px;
+    width: 28px;
+  }
+
+  /* Tighten fixed columns on mobile so CODE gets more room */
+  .colSn    { width: 28px; }
+  .colUnits { width: 52px; }
+  .colGrade { width: 52px; }
+  .colTcu   { width: 44px; }
+  .colDel   { width: 28px; }
+
+  .cellTcu {
+    padding: 6px 4px;
+    font-size: 11px;
+  }
+
+  .cellDel {
+    padding: 3px 4px;
+    width: 28px;
+  }
+
+  .deleteRowBtn {
+    width: 22px;
+    height: 22px;
+    font-size: 10px;
+  }
+
+  .summaryRow td {
+    font-size: 10.5px;
+    padding: 5px 5px;
+  }
+
+  .semesterControls {
+    padding: 8px;
+    gap: 5px;
+  }
+
+  .btn {
+    font-size: 9.5px;
+    padding: 6px 5px;
+    gap: 3px;
+  }
+
+  .yearLabel {
+    font-size: 1.1rem;
+  }
 }
