@@ -5,7 +5,6 @@ function App() {
   return (
     <Routes>
       <Route path="/" element={<CgpaCalculator />} />
-      <Route path="/cgpa-calculator" element={<CgpaCalculator />} />
     </Routes>
   );
 }
