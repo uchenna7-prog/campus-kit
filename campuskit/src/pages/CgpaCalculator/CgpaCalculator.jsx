@@ -268,12 +268,12 @@ function CgpaCalculator() {
                           <table className={styles.coursesTable}>
                             <thead>
                               <tr>
-                                <th style={{ width: "36px", textAlign: "center" }}>S/N</th>
-                                <th>CODE</th>
-                                <th style={{ width: "64px", textAlign: "center" }}>UNITS</th>
-                                <th style={{ width: "58px", textAlign: "center" }}>GRADE</th>
-                                <th style={{ width: "50px", textAlign: "center" }}>TCU</th>
-                                <th style={{ width: "32px" }}></th>
+                                <th className={styles.colSn} style={{ textAlign: "center" }}>S/N</th>
+                                <th className={styles.colCode}>CODE</th>
+                                <th className={styles.colUnits} style={{ textAlign: "center" }}>UNITS</th>
+                                <th className={styles.colGrade} style={{ textAlign: "center" }}>GRADE</th>
+                                <th className={styles.colTcu} style={{ textAlign: "center" }}>TCU</th>
+                                <th className={styles.colDel}></th>
                               </tr>
                             </thead>
                             <tbody>
