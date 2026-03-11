@@ -41,7 +41,6 @@ function nextYearSem(semesters) {
     : { year: last.year + 1, sem: 1 };
 }
 
-// ── Component ─────────────────────────────────────────────────
 function CgpaCalculator() {
   const navigate = useNavigate();
   const [semesters, setSemesters] = useState([newSemester(1, 1)]);
@@ -108,7 +107,7 @@ function CgpaCalculator() {
   // ── GPA calculation ─────────────────────────────────────────
   const calculateSemesterGPA = useCallback((semId) => {
     setSemesters((prev) => {
-      const updated = prev.map((s) => {
+      return prev.map((s) => {
         if (s.id !== semId) return s;
         if (!s.courses.length) return { ...s, gpa: null };
         const totalUnits = s.courses.reduce((a, c) => a + (Number(c.unit) || 0), 0);
@@ -122,7 +121,6 @@ function CgpaCalculator() {
         );
         return { ...s, gpa: weighted / totalUnits };
       });
-      return updated;
     });
 
     requestAnimationFrame(() => {
@@ -161,7 +159,6 @@ function CgpaCalculator() {
     const result = weightedAll / totalUnitsAll;
     setCgpa(result);
 
-    // Also update all semester GPAs
     setSemesters((prev) =>
       prev.map((s) => {
         if (!s.courses.length) return s;
