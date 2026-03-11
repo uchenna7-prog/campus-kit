@@ -1,5 +1,5 @@
 import { useNavigate } from "react-router-dom";
-import SideBar from "../../components/SideBar/SideBar";
+import SideBar from "../../components/Sidebar/Sidebar";
 import Header from "../../components/Header/Header";
 import styles from "./CgpaCalculator.module.css";
 import { useGpa } from "../../contexts/GpaContext";
