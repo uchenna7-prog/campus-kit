@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import SideBar from "../../components/Sidebar/Sidebar";
 import Header from "../../components/Header/Header";
@@ -40,7 +40,33 @@ function CgpaCalculator() {
   const [semesters, setSemesters] = useState([newSemester(1, 1)]);
   const [cgpa, setCgpa] = useState(null);
   const [cgpaError, setCgpaError] = useState(false);
+  const [scrollToSemId, setScrollToSemId] = useState(null);
+  const [shouldScrollToCgpa, setShouldScrollToCgpa] = useState(false);
   const cgpaCardRef = useRef(null);
+  const semCardRefs = useRef({});
+
+  // Scroll to semester header after GPA is calculated
+  useEffect(() => {
+    if (scrollToSemId == null) return;
+    const el = semCardRefs.current[scrollToSemId];
+    if (el) {
+      const topbarH = 56 + 12;
+      const y = el.getBoundingClientRect().top + window.scrollY - topbarH;
+      window.scrollTo({ top: y, behavior: "smooth" });
+    }
+    setScrollToSemId(null);
+  }, [semesters, scrollToSemId]);
+
+  // Scroll to CGPA card after it renders
+  useEffect(() => {
+    if (!shouldScrollToCgpa) return;
+    if (cgpaCardRef.current) {
+      const topbarH = 56 + 12;
+      const y = cgpaCardRef.current.getBoundingClientRect().top + window.scrollY - topbarH;
+      window.scrollTo({ top: y, behavior: "smooth" });
+    }
+    setShouldScrollToCgpa(false);
+  }, [cgpa, shouldScrollToCgpa]);
 
   const honours = getHonours(cgpa);
 
@@ -117,6 +143,7 @@ function CgpaCalculator() {
         return { ...s, gpa: weighted / totalUnits };
       })
     );
+    setScrollToSemId(semId);
   };
 
   // ── CGPA ──
@@ -158,10 +185,7 @@ function CgpaCalculator() {
 
     if (totalUnitsAll === 0) { setCgpa(null); return; }
     setCgpa(weightedAll / totalUnitsAll);
-
-    setTimeout(() => {
-      cgpaCardRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
-    }, 50);
+    setShouldScrollToCgpa(true);
   };
 
   // ── Group by year ──
@@ -217,7 +241,11 @@ function CgpaCalculator() {
                   const gpaError = sem.gpa === "error";
 
                   return (
-                    <div key={sem.id} className={styles.semesterCard}>
+                    <div
+                      key={sem.id}
+                      className={styles.semesterCard}
+                      ref={(el) => { semCardRefs.current[sem.id] = el; }}
+                    >
                       {/* Semester Header */}
                       <div className={styles.semesterHeader}>
                         <span className={styles.semesterTitle}>
