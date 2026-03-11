@@ -16,7 +16,7 @@ export default function SideBar() {
 
       <aside className={`${styles.sidebar} ${isCollapsed ? styles.collapsed : ""} ${isMobile && isOpen ? styles.open : ""}`}>
         <div className={styles.sidebarHeader}>
-          <Link className={styles.logo} to="/">
+          <Link className={styles.logo} to="/cgpa-calculator">
             <div className={styles.logoMark}>
               <i className="fa-solid fa-graduation-cap"></i>
             </div>
@@ -45,7 +45,7 @@ export default function SideBar() {
 
           <div className={styles.navDivider}></div>
           <div className={styles.navGroupTitle}>Academic Tools</div>
-          <Link className={`${styles.navItem} ${isActive("/") ? styles.active : ""}`} to="/">
+          <Link className={`${styles.navItem} ${isActive("/cgpa-calculator") ? styles.active : ""}`} to="/cgpa-calculator">
             <i className={`fa-solid fa-chart-simple ${styles.navIcon}`}></i>
             <span className={styles.navLabel}>CGPA Calculator</span>
           </Link>
