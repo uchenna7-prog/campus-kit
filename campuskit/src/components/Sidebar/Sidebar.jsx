@@ -1,5 +1,5 @@
 import { Link, useLocation } from "react-router-dom";
-import styles from "./SideBar.module.css";
+import styles from "./Sidebar.module.css";
 import { useSideBarContext } from "../../contexts/SidebarContext";
 
 export default function SideBar() {
