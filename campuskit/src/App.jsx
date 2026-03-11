@@ -1,13 +1,12 @@
 import { Routes, Route } from "react-router-dom";
-
-function Test() {
-  return <h1 style={{padding:40}}>CampusKit is working</h1>;
-}
+import CgpaCalculator from "./pages/CgpaCalculator/CgpaCalculator";
 
 function App() {
   return (
     <Routes>
-      <Route path="/" element={<Test />} />
+      {/* Root route: CGPA Calculator */}
+      <Route path="/" element={<CgpaCalculator />} />
+      {/* You can add more routes here in the future */}
     </Routes>
   );
 }
