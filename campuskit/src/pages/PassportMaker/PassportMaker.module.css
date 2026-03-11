@@ -1,1 +1,627 @@
-...
+/* ── Variables ── */
+:root {
+  --white: #ffffff;
+  --off-white: #f7f7f5;
+  --gray-50: #f4f4f2;
+  --gray-100: #e8e8e5;
+  --gray-200: #d0d0cc;
+  --gray-400: #9a9a94;
+  --gray-600: #5c5c58;
+  --gray-800: #2a2a26;
+  --black: #0f0f0e;
+  --ink: #1a1a18;
+  --green: #16a34a;
+  --green-light: #f0fdf4;
+  --radius: 10px;
+  --radius-lg: 14px;
+}
+
+/* ── Layout ── */
+.homeContainer {
+  display: flex;
+  min-height: 100vh;
+  width: 100%;
+  background-color: var(--off-white);
+  box-sizing: border-box;
+}
+
+.mainWrapper {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  background-color: var(--off-white);
+}
+
+.mainContent {
+  flex: 1;
+  overflow-y: auto;
+  padding-top: 56px; /* fixed topbar height */
+}
+
+.page {
+  padding: 24px 24px 80px;
+  max-width: 900px;
+}
+
+/* ── Page Header ── */
+.pageHeader {
+  margin-bottom: 20px;
+  animation: rise 0.4s ease both;
+}
+
+.pageEyebrow {
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--gray-400);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin-bottom: 4px;
+}
+
+.pageTitle {
+  font-family: 'Instrument Serif', serif;
+  font-size: clamp(1.4rem, 3vw, 1.8rem);
+  font-weight: 400;
+  color: var(--black);
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+}
+
+.pageTitle em {
+  font-style: italic;
+  color: var(--gray-400);
+}
+
+/* ── Steps ── */
+.steps {
+  display: flex;
+  align-items: center;
+  margin-bottom: 20px;
+  animation: rise 0.4s 0.04s ease both;
+}
+
+.step {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--gray-400);
+  flex-shrink: 0;
+}
+
+.step.active {
+  color: var(--ink);
+}
+
+.step.done {
+  color: var(--green);
+}
+
+.stepNum {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--gray-100);
+  color: var(--gray-400);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 700;
+  flex-shrink: 0;
+  transition: background 0.2s, color 0.2s;
+}
+
+.step.active .stepNum {
+  background: var(--ink);
+  color: var(--white);
+}
+
+.step.done .stepNum {
+  background: var(--green);
+  color: var(--white);
+}
+
+.stepLine {
+  flex: 1;
+  height: 1px;
+  background: var(--gray-100);
+  margin: 0 10px;
+  min-width: 16px;
+}
+
+.stepLabel {
+  /* hidden on mobile via media query */
+}
+
+/* ── Card ── */
+.card {
+  background: var(--white);
+  border: 1px solid var(--gray-100);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+
+.cardHeader {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--gray-100);
+  background: var(--gray-50);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.cardTitle {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink);
+}
+
+.cardSub {
+  font-size: 11px;
+  color: var(--gray-400);
+  margin-top: 1px;
+}
+
+/* ── Upload ── */
+.uploadZone {
+  border: 2px dashed var(--gray-200);
+  border-radius: var(--radius);
+  margin: 16px;
+  padding: 44px 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  transition: border-color 0.2s, background 0.2s;
+  text-align: center;
+}
+
+.uploadZone:hover,
+.uploadZone.dragOver {
+  border-color: var(--ink);
+  background: var(--gray-50);
+}
+
+.uploadIcon {
+  width: 50px;
+  height: 50px;
+  background: var(--gray-50);
+  border-radius: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 22px;
+  color: var(--gray-400);
+  transition: background 0.2s;
+}
+
+.uploadZone:hover .uploadIcon {
+  background: var(--gray-100);
+  color: var(--ink);
+}
+
+.uploadTitle {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.uploadHint {
+  font-size: 12px;
+  color: var(--gray-400);
+}
+
+.uploadCta {
+  background: var(--ink);
+  color: var(--white);
+  border: none;
+  padding: 9px 20px;
+  border-radius: var(--radius);
+  font-size: 12.5px;
+  font-weight: 600;
+  margin-top: 6px;
+  cursor: pointer;
+  transition: opacity 0.15s;
+  font-family: inherit;
+}
+
+.uploadCta:hover {
+  opacity: 0.85;
+}
+
+/* ── Processing ── */
+.processingWrap {
+  padding: 44px 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+}
+
+.spinner {
+  width: 38px;
+  height: 38px;
+  border: 3px solid var(--gray-100);
+  border-top-color: var(--ink);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.processingTitle {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.processingSub {
+  font-size: 12px;
+  color: var(--gray-400);
+  text-align: center;
+  max-width: 280px;
+}
+
+.progressTrack {
+  width: 240px;
+  height: 4px;
+  background: var(--gray-100);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.progressFill {
+  height: 100%;
+  background: var(--ink);
+  border-radius: 4px;
+  width: 0%;
+  transition: width 0.4s ease;
+}
+
+/* ── Editor layout ── */
+.editorLayout {
+  display: grid;
+  grid-template-columns: 1fr 290px;
+  gap: 14px;
+  align-items: start;
+}
+
+/* ── Preview ── */
+.previewArea {
+  background: var(--gray-50);
+  padding: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 260px;
+  position: relative;
+}
+
+.checker {
+  background-image:
+    linear-gradient(45deg, #e0e0e0 25%, transparent 25%),
+    linear-gradient(-45deg, #e0e0e0 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #e0e0e0 75%),
+    linear-gradient(-45deg, transparent 75%, #e0e0e0 75%);
+  background-size: 12px 12px;
+  background-position: 0 0, 0 6px, 6px -6px, -6px 0;
+}
+
+.resultCanvas {
+  max-width: 100%;
+  max-height: 300px;
+  border-radius: 5px;
+  display: block;
+}
+
+.previewBar {
+  padding: 10px 14px;
+  border-top: 1px solid var(--gray-100);
+  display: flex;
+  gap: 7px;
+}
+
+/* ── Buttons ── */
+.btn {
+  border: none;
+  padding: 8px 10px;
+  border-radius: var(--radius);
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  transition: opacity 0.15s, transform 0.1s;
+  white-space: nowrap;
+  font-family: inherit;
+}
+
+.btn:active {
+  transform: scale(0.97);
+}
+
+.primary {
+  background: var(--ink);
+  color: var(--white);
+  flex: 1;
+}
+
+.primary:hover {
+  opacity: 0.85;
+}
+
+.ghost {
+  background: var(--white);
+  color: var(--ink);
+  border: 1px solid var(--gray-200);
+}
+
+.ghost:hover {
+  background: var(--gray-50);
+}
+
+.btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+/* ── Settings ── */
+.settingBlock {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--gray-100);
+}
+
+.settingBlock:last-child {
+  border-bottom: none;
+}
+
+.sLabel {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--ink);
+  margin-bottom: 9px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+/* ── Swatches ── */
+.swatchGrid {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.swatch {
+  aspect-ratio: 1;
+  border-radius: 7px;
+  border: 2px solid transparent;
+  cursor: pointer;
+  transition: transform 0.1s, border-color 0.15s;
+  position: relative;
+}
+
+.swatch:hover {
+  transform: scale(1.12);
+}
+
+.swatch.active {
+  border-color: var(--ink);
+}
+
+.swatch.onDark.active {
+  border-color: var(--white);
+  outline: 2px solid var(--ink);
+}
+
+.customColorRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.customLabel {
+  font-size: 11px;
+  color: var(--gray-600);
+}
+
+.customColorInput {
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--gray-200);
+  border-radius: 7px;
+  cursor: pointer;
+  padding: 2px;
+  background: none;
+}
+
+/* ── Preset tabs ── */
+.presetRow {
+  display: flex;
+  gap: 5px;
+}
+
+.ptab {
+  flex: 1;
+  border: 1px solid var(--gray-200);
+  background: var(--white);
+  border-radius: 8px;
+  padding: 7px 4px;
+  text-align: center;
+  cursor: pointer;
+  transition: background 0.13s, border-color 0.13s;
+}
+
+.ptab.active {
+  background: var(--ink);
+  border-color: var(--ink);
+}
+
+.ptabName {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.ptab.active .ptabName {
+  color: var(--white);
+}
+
+.ptabDim {
+  font-size: 9px;
+  color: var(--gray-400);
+  margin-top: 1px;
+}
+
+.ptab.active .ptabDim {
+  color: rgba(255, 255, 255, 0.55);
+}
+
+/* ── Qty ── */
+.qtyRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.qtyCtl {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.qbtn {
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+  border: 1px solid var(--gray-200);
+  background: var(--white);
+  color: var(--ink);
+  font-size: 15px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 0.13s;
+  font-family: inherit;
+}
+
+.qbtn:hover {
+  background: var(--gray-50);
+}
+
+.qval {
+  font-size: 14px;
+  font-weight: 700;
+  min-width: 22px;
+  text-align: center;
+}
+
+/* ── Sliders ── */
+.slRow {
+  margin-bottom: 9px;
+}
+
+.slRow:last-child {
+  margin-bottom: 0;
+}
+
+.slHead {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--gray-600);
+  margin-bottom: 4px;
+}
+
+.slHead strong {
+  color: var(--ink);
+}
+
+.slRow input[type="range"] {
+  width: 100%;
+  accent-color: var(--ink);
+}
+
+/* ── Output ── */
+.outputGrid {
+  padding: 14px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  justify-content: center;
+  background: var(--gray-50);
+  min-height: 90px;
+}
+
+.pthumb {
+  border: 1px solid var(--gray-200);
+  border-radius: 3px;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.pthumb img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.emptyMsg {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  color: var(--gray-400);
+  font-size: 12px;
+  padding: 18px 0;
+}
+
+.emptyMsg i {
+  font-size: 1.6rem;
+  color: var(--gray-200);
+}
+
+.dlBar {
+  padding: 11px 14px;
+  border-top: 1px solid var(--gray-100);
+  display: flex;
+  gap: 7px;
+}
+
+/* ── Animations ── */
+@keyframes rise {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ── Mobile ── */
+@media (max-width: 768px) {
+  .page {
+    padding: 16px 12px 80px;
+  }
+
+  .editorLayout {
+    grid-template-columns: 1fr;
+  }
+
+  .stepLabel {
+    display: none;
+  }
+}
