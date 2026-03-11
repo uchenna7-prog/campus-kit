@@ -1,57 +1,40 @@
-import { useLocation } from "react-router-dom";
+// Header.jsx
 import styles from "./Header.module.css";
+import { useSideBarContext } from "../../contexts/SideBarContext";
 
-const PAGE_META = {
-  "/":             { title: "CGPA Calculator",    sub: "Academic Tools"    },
-  "/gpa-predictor":{ title: "GPA Predictor",      sub: "Academic Tools"    },
-  "/timetable":    { title: "Study Timetable",    sub: "Academic Tools"    },
-  "/passport":     { title: "Passport Maker",     sub: "Student Utilities" },
-  "/scanner":      { title: "Document Scanner",   sub: "Student Utilities" },
-  "/pdf":          { title: "PDF Tools",          sub: "Student Utilities" },
-  "/scholarships": { title: "Scholarship Finder", sub: "Opportunities"     },
-  "/internships":  { title: "Internship Finder",  sub: "Opportunities"     },
-  "/ai":           { title: "CampusKit AI",       sub: null                },
-  "/settings":     { title: "Settings",           sub: null                },
-  "/help":         { title: "Help & Feedback",    sub: null                },
-  "/summary":      { title: "Summary",            sub: "CGPA Calculator"   },
-};
-
-export default function Header() {
-  const { pathname } = useLocation();
-  const meta = PAGE_META[pathname] ?? { title: "CampusKit", sub: null };
-
-  const openSidebar = () => {
-    window.dispatchEvent(new Event("sidebar:open"));
-  };
+function Header() {
+  const { isMobile, toggleSideBar, isCollapsed } = useSideBarContext();
 
   return (
-    <header className={styles.topbar}>
-      {/* Mobile hamburger — only visible on small screens */}
-      <button
-        className={styles.menuBtn}
-        onClick={openSidebar}
-        aria-label="Open menu"
-      >
-        <i className="fa-solid fa-bars" />
-      </button>
+    <header className={`${styles.topbar} ${isCollapsed ? styles.shifted : ""}`}>
+      {isMobile && (
+        <button className={styles.menuBtn} onClick={toggleSideBar}>
+          <i className="fa-solid fa-bars"></i>
+        </button>
+      )}
 
-      {/* Page title */}
-      <div className={styles.titleWrap}>
-        <span className={styles.title}>{meta.title}</span>
-        {meta.sub && <span className={styles.sub}>{meta.sub}</span>}
+      <div className={styles.topbarLeft}>
+        <button className={styles.topbarBack}>
+          <i className="fa-solid fa-chevron-left"></i>
+        </button>
+        <div>
+          <div className={styles.topbarTitle}>CGPA Calculator</div>
+          <div className={styles.topbarSub}>5.0 Grading Scale</div>
+        </div>
       </div>
 
-      {/* Right actions */}
-      <div className={styles.actions}>
-        <button className={styles.iconBtn} aria-label="Settings">
-          <i className="fa-solid fa-sliders" />
+      <div className={styles.topbarActions}>
+        <button className={styles.iconBtn} title="Settings">
+          <i className="fa-solid fa-sliders"></i>
         </button>
-        <button className={styles.iconBtn} aria-label="Notifications">
-          <i className="fa-regular fa-bell" />
-          <span className={styles.notifDot} />
+        <button className={styles.iconBtn}>
+          <i className="fa-regular fa-bell"></i>
+          <span className={styles.notifDot}></span>
         </button>
-        <button className={styles.avatarBtn} aria-label="Profile">UC</button>
+        <button className={styles.avatarBtn}>UC</button>
       </div>
     </header>
   );
 }
+
+export default Header;
