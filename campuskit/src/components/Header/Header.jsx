@@ -1,5 +1,5 @@
 import styles from "./Header.module.css";
-import { useSideBarContext } from "../../contexts/SideBarContext";
+import { useSideBarContext } from "../../contexts/SidebarContext";
 
 function Header() {
   const { isMobile, toggleSideBar, isCollapsed } = useSideBarContext();
