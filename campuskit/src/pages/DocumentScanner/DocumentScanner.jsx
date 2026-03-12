@@ -1,35 +1,150 @@
-import { useState, useRef, useCallback, useEffect } from "react";
+import { useState, useRef, useEffect } from "react";
 import SideBar from "../../components/Sidebar/Sidebar";
 import Header from "../../components/Header/Header";
 import styles from "./DocumentScanner.module.css";
 
-// ── Helpers ────────────────────────────────────────────────────
-function autoEnhance(canvas) {
-  const ctx = canvas.getContext("2d");
-  const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-  const data = imageData.data;
+// ─────────────────────────────────────────────────────────────
+//  IMAGE PROCESSING  (CamScanner-style pipeline, pure Canvas)
+// ─────────────────────────────────────────────────────────────
 
-  // Find min/max for auto-levels
-  let min = 255, max = 0;
-  for (let i = 0; i < data.length; i += 4) {
-    const lum = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
-    if (lum < min) min = lum;
-    if (lum > max) max = lum;
-  }
-  const range = max - min || 1;
+const clamp = (v) => Math.max(0, Math.min(255, v));
 
-  for (let i = 0; i < data.length; i += 4) {
-    // Auto-levels stretch
-    data[i]     = Math.min(255, ((data[i]     - min) / range) * 255 * 1.05);
-    data[i + 1] = Math.min(255, ((data[i + 1] - min) / range) * 255 * 1.05);
-    data[i + 2] = Math.min(255, ((data[i + 2] - min) / range) * 255 * 1.05);
-    // Slight contrast boost
-    for (let c = 0; c < 3; c++) {
-      const v = data[i + c] / 255;
-      data[i + c] = Math.min(255, Math.max(0, (v - 0.5) * 1.15 + 0.5) * 255);
+/**
+ * Box-blur a Float32Array in-place, returns new blurred array.
+ * Used for local mean shadow-removal.
+ */
+function boxBlur(src, w, h, r) {
+  const tmp = new Float32Array(w * h);
+  const out = new Float32Array(w * h);
+  // horizontal
+  for (let y = 0; y < h; y++) {
+    let sum = 0;
+    for (let x = 0; x < w; x++) {
+      sum += src[y * w + x];
+      if (x > r) sum -= src[y * w + (x - r - 1)];
+      const start = Math.max(0, x - r);
+      tmp[y * w + x] = sum / (x - start + 1);
     }
   }
-  ctx.putImageData(imageData, 0, 0);
+  // vertical
+  for (let x = 0; x < w; x++) {
+    let sum = 0;
+    for (let y = 0; y < h; y++) {
+      sum += tmp[y * w + x];
+      if (y > r) sum -= tmp[(y - r - 1) * w + x];
+      const start = Math.max(0, y - r);
+      out[y * w + x] = sum / (y - start + 1);
+    }
+  }
+  return out;
+}
+
+/**
+ * CamScanner B&W pipeline:
+ * greyscale → local-mean shadow removal → adaptive threshold → unsharp mask
+ */
+function applyBW(canvas) {
+  const ctx = canvas.getContext("2d");
+  const { width: w, height: h } = canvas;
+  const src = ctx.getImageData(0, 0, w, h).data;
+
+  // 1. greyscale
+  const grey = new Float32Array(w * h);
+  for (let i = 0; i < w * h; i++) {
+    const p = i * 4;
+    grey[i] = 0.299 * src[p] + 0.587 * src[p + 1] + 0.114 * src[p + 2];
+  }
+
+  // 2. local mean (large radius) for shadow / uneven lighting
+  const r = Math.max(8, Math.round(Math.min(w, h) * 0.05));
+  const localMean = boxBlur(grey, w, h, r);
+
+  // 3. adaptive threshold: pixel black if significantly darker than local mean
+  const C = 14;
+  const binary = new Uint8Array(w * h);
+  for (let i = 0; i < w * h; i++) {
+    binary[i] = grey[i] < localMean[i] - C ? 0 : 255;
+  }
+
+  // 4. small unsharp mask to sharpen edges
+  const bF = new Float32Array(binary);
+  const blurred = boxBlur(bF, w, h, 1);
+  const sharp = new Float32Array(w * h);
+  for (let i = 0; i < w * h; i++) {
+    sharp[i] = clamp(binary[i] + 1.5 * (binary[i] - blurred[i]));
+  }
+
+  // 5. write back
+  const out = ctx.createImageData(w, h);
+  const od = out.data;
+  for (let i = 0; i < w * h; i++) {
+    const v = sharp[i] > 128 ? 255 : 0; // hard binarise
+    const p = i * 4;
+    od[p] = od[p + 1] = od[p + 2] = v;
+    od[p + 3] = 255;
+  }
+  ctx.putImageData(out, 0, 0);
+}
+
+/**
+ * CamScanner Greyscale pipeline:
+ * greyscale → auto-levels → contrast boost → unsharp mask
+ */
+function applyGrey(canvas) {
+  const ctx = canvas.getContext("2d");
+  const { width: w, height: h } = canvas;
+  const id = ctx.getImageData(0, 0, w, h);
+  const d = id.data;
+
+  // greyscale + auto-levels
+  const vals = [];
+  for (let i = 0; i < d.length; i += 4) {
+    vals.push(0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2]);
+  }
+  let lo = 255, hi = 0;
+  vals.forEach((v) => { if (v < lo) lo = v; if (v > hi) hi = v; });
+  const range = hi - lo || 1;
+
+  for (let i = 0; i < d.length; i += 4) {
+    let v = ((vals[i / 4] - lo) / range) * 255;
+    // S-curve contrast
+    v = clamp((v / 255 - 0.5) * 1.35 + 0.5) * 255;
+    d[i] = d[i + 1] = d[i + 2] = clamp(v);
+  }
+  ctx.putImageData(id, 0, 0);
+}
+
+/**
+ * Colour mode: just auto-levels + slight contrast
+ */
+function applyColour(canvas) {
+  const ctx = canvas.getContext("2d");
+  const { width: w, height: h } = canvas;
+  const id = ctx.getImageData(0, 0, w, h);
+  const d = id.data;
+  let rMin = 255, rMax = 0, gMin = 255, gMax = 0, bMin = 255, bMax = 0;
+  for (let i = 0; i < d.length; i += 4) {
+    if (d[i]   < rMin) rMin = d[i];   if (d[i]   > rMax) rMax = d[i];
+    if (d[i+1] < gMin) gMin = d[i+1]; if (d[i+1] > gMax) gMax = d[i+1];
+    if (d[i+2] < bMin) bMin = d[i+2]; if (d[i+2] > bMax) bMax = d[i+2];
+  }
+  const rR = rMax - rMin || 1, gR = gMax - gMin || 1, bR = bMax - bMin || 1;
+  for (let i = 0; i < d.length; i += 4) {
+    d[i]   = clamp(((d[i]   - rMin) / rR) * 255 * 1.05);
+    d[i+1] = clamp(((d[i+1] - gMin) / gR) * 255 * 1.05);
+    d[i+2] = clamp(((d[i+2] - bMin) / bR) * 255 * 1.05);
+  }
+  ctx.putImageData(id, 0, 0);
+}
+
+function processCanvas(rawCanvas, mode) {
+  const c = document.createElement("canvas");
+  c.width = rawCanvas.width; c.height = rawCanvas.height;
+  c.getContext("2d").drawImage(rawCanvas, 0, 0);
+  if (mode === "bw")     applyBW(c);
+  else if (mode === "grey")   applyGrey(c);
+  else if (mode === "colour") applyColour(c);
+  return c;
 }
 
 function fileToCanvas(file) {
@@ -38,14 +153,9 @@ function fileToCanvas(file) {
     reader.onload = (e) => {
       const img = new Image();
       img.onload = () => {
-        // Cap size for performance
-        const MAX = 2000;
+        const MAX = 2400;
         let w = img.naturalWidth, h = img.naturalHeight;
-        if (w > MAX || h > MAX) {
-          const ratio = Math.min(MAX / w, MAX / h);
-          w = Math.round(w * ratio);
-          h = Math.round(h * ratio);
-        }
+        if (w > MAX || h > MAX) { const r = Math.min(MAX/w, MAX/h); w = Math.round(w*r); h = Math.round(h*r); }
         const c = document.createElement("canvas");
         c.width = w; c.height = h;
         c.getContext("2d").drawImage(img, 0, 0, w, h);
@@ -57,68 +167,61 @@ function fileToCanvas(file) {
   });
 }
 
-function canvasToDataUrl(canvas) {
-  return canvas.toDataURL("image/jpeg", 0.92);
-}
+const toJpeg = (c) => c.toDataURL("image/jpeg", 0.93);
 
-let idCounter = 0;
-function makeId() { return ++idCounter; }
+let _uid = 0;
+const uid = () => ++_uid;
 
-// ── Component ──────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────
+//  COMPONENT
+// ─────────────────────────────────────────────────────────────
 export default function DocumentScanner() {
-  const [pages, setPages] = useState([]);
+  const [pages, setPages]           = useState([]);
   const [selectedId, setSelectedId] = useState(null);
-  const [editMode, setEditMode] = useState(null); // null | "enhance" | "crop"
+  const [editMode, setEditMode]     = useState(null);
   const [cameraOpen, setCameraOpen] = useState(false);
-  const [dragOverId, setDragOverId] = useState(null);
-  const [dragId, setDragId] = useState(null);
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [processingLabel, setProcessingLabel] = useState("");
-  const [exportMenuOpen, setExportMenuOpen] = useState(false);
-  const [toast, setToast] = useState(null);
+  const [dragOverIdx, setDragOverIdx] = useState(null);
+  const [dragIdx, setDragIdx]       = useState(null);
+  const [processing, setProcessing] = useState(false);
+  const [procLabel, setProcLabel]   = useState("");
+  const [exportOpen, setExportOpen] = useState(false);
+  const [toast, setToast]           = useState(null);
+  const [scanMode, setScanMode]     = useState("bw");
+  const [adjVals, setAdjVals]       = useState({ brt: 100, con: 110 });
 
-  // Enhance sliders state per selected page
-  const [enhanceVals, setEnhanceVals] = useState({ brt: 100, con: 110, sat: 95, sharpen: 1 });
+  const fileRef    = useRef(null);
+  const videoRef   = useRef(null);
+  const streamRef  = useRef(null);
+  const dragSrcRef = useRef(null);
 
-  const fileInputRef = useRef(null);
-  const videoRef = useRef(null);
-  const cameraCanvasRef = useRef(null);
-  const streamRef = useRef(null);
-  const dragSrcIndex = useRef(null);
+  const selectedPage = pages.find((p) => p.id === selectedId) ?? null;
 
-  const selectedPage = pages.find((p) => p.id === selectedId) || null;
-
-  // ── Toast ─────────────────────────────────────────────────────
   function showToast(msg, type = "success") {
     setToast({ msg, type });
     setTimeout(() => setToast(null), 2800);
   }
 
-  // ── Add pages from files ──────────────────────────────────────
+  // ── Add files ──────────────────────────────────────────────
   async function handleFiles(files) {
     if (!files?.length) return;
-    setIsProcessing(true);
+    setProcessing(true);
     const arr = Array.from(files);
+    const newPages = [];
     for (let i = 0; i < arr.length; i++) {
-      setProcessingLabel(`Processing page ${i + 1} of ${arr.length}…`);
-      const canvas = await fileToCanvas(arr[i]);
-      autoEnhance(canvas);
-      const dataUrl = canvasToDataUrl(canvas);
-      const page = {
-        id: makeId(),
-        dataUrl,
-        originalDataUrl: dataUrl,
-        name: arr[i].name || `Page ${pages.length + i + 1}`,
-        canvas,
-      };
-      setPages((prev) => [...prev, page]);
+      setProcLabel(`Scanning page ${i + 1} of ${arr.length}…`);
+      const raw = await fileToCanvas(arr[i]);
+      const processed = processCanvas(raw, scanMode);
+      const p = { id: uid(), dataUrl: toJpeg(processed), rawCanvas: raw, mode: scanMode,
+        name: arr[i].name?.replace(/\.[^.]+$/, "") || `Page ${pages.length + i + 1}` };
+      newPages.push(p);
+      setPages((prev) => [...prev, p]);
     }
-    setIsProcessing(false);
-    setProcessingLabel("");
-    showToast(`${arr.length} page${arr.length > 1 ? "s" : ""} added`);
+    if (!selectedId && newPages.length) setSelectedId(newPages[0].id);
+    setProcessing(false); setProcLabel("");
+    showToast(`${arr.length} page${arr.length > 1 ? "s" : ""} scanned`);
   }
 
-  // ── Camera ────────────────────────────────────────────────────
+  // ── Camera ─────────────────────────────────────────────────
   async function openCamera() {
     setCameraOpen(true);
     try {
@@ -126,217 +229,133 @@ export default function DocumentScanner() {
         video: { facingMode: "environment", width: { ideal: 1920 }, height: { ideal: 1080 } },
       });
       streamRef.current = stream;
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        videoRef.current.play();
-      }
-    } catch {
-      showToast("Camera access denied", "error");
-      setCameraOpen(false);
-    }
+      if (videoRef.current) { videoRef.current.srcObject = stream; videoRef.current.play(); }
+    } catch { showToast("Camera access denied", "error"); setCameraOpen(false); }
   }
 
   function closeCamera() {
     streamRef.current?.getTracks().forEach((t) => t.stop());
-    streamRef.current = null;
-    setCameraOpen(false);
+    streamRef.current = null; setCameraOpen(false);
   }
 
-  async function captureCamera() {
-    const video = videoRef.current;
-    if (!video) return;
-    setIsProcessing(true);
-    setProcessingLabel("Enhancing capture…");
-    const c = document.createElement("canvas");
-    c.width = video.videoWidth;
-    c.height = video.videoHeight;
-    c.getContext("2d").drawImage(video, 0, 0);
-    autoEnhance(c);
-    const dataUrl = canvasToDataUrl(c);
-    const page = {
-      id: makeId(),
-      dataUrl,
-      originalDataUrl: dataUrl,
-      name: `Scan ${pages.length + 1}`,
-      canvas: c,
-    };
-    setPages((prev) => [...prev, page]);
-    setIsProcessing(false);
-    setProcessingLabel("");
+  async function capturePhoto() {
+    const video = videoRef.current; if (!video) return;
+    setProcessing(true); setProcLabel("Processing scan…");
+    const raw = document.createElement("canvas");
+    raw.width = video.videoWidth; raw.height = video.videoHeight;
+    raw.getContext("2d").drawImage(video, 0, 0);
+    const processed = processCanvas(raw, scanMode);
+    const p = { id: uid(), dataUrl: toJpeg(processed), rawCanvas: raw, mode: scanMode, name: `Scan ${pages.length + 1}` };
+    setPages((prev) => [...prev, p]);
+    setSelectedId(p.id);
+    setProcessing(false); setProcLabel("");
     showToast("Page captured");
   }
 
-  // ── Delete ────────────────────────────────────────────────────
+  // ── Delete ─────────────────────────────────────────────────
   function deletePage(id) {
-    setPages((prev) => prev.filter((p) => p.id !== id));
-    if (selectedId === id) { setSelectedId(null); setEditMode(null); }
+    setPages((prev) => {
+      const next = prev.filter((p) => p.id !== id);
+      if (selectedId === id) { setSelectedId(next[0]?.id ?? null); setEditMode(null); }
+      return next;
+    });
     showToast("Page removed");
   }
 
-  // ── Drag & drop reorder ───────────────────────────────────────
-  function onDragStart(e, id, index) {
-    dragSrcIndex.current = index;
-    setDragId(id);
-    e.dataTransfer.effectAllowed = "move";
-  }
-  function onDragOver(e, id) {
-    e.preventDefault();
-    setDragOverId(id);
-  }
-  function onDrop(e, targetIndex) {
-    e.preventDefault();
-    const src = dragSrcIndex.current;
-    if (src === null || src === targetIndex) { setDragOverId(null); return; }
-    setPages((prev) => {
-      const arr = [...prev];
-      const [moved] = arr.splice(src, 1);
-      arr.splice(targetIndex, 0, moved);
-      return arr;
-    });
-    setDragOverId(null);
-    setDragId(null);
-    dragSrcIndex.current = null;
-  }
-  function onDragEnd() {
-    setDragOverId(null);
-    setDragId(null);
-  }
-
-  // ── Enhance apply ─────────────────────────────────────────────
-  function applyEnhance() {
-    if (!selectedPage) return;
-    const orig = new Image();
-    orig.onload = () => {
-      const c = document.createElement("canvas");
-      c.width = orig.naturalWidth; c.height = orig.naturalHeight;
-      const ctx = c.getContext("2d");
-      ctx.filter = `brightness(${enhanceVals.brt}%) contrast(${enhanceVals.con}%) saturate(${enhanceVals.sat}%)`;
-      ctx.drawImage(orig, 0, 0);
-      ctx.filter = "none";
-      const dataUrl = canvasToDataUrl(c);
-      setPages((prev) =>
-        prev.map((p) => p.id === selectedId ? { ...p, dataUrl, canvas: c } : p)
-      );
-      showToast("Enhancements applied");
-      setEditMode(null);
-    };
-    orig.src = selectedPage.originalDataUrl;
-  }
-
-  function resetEnhance() {
-    if (!selectedPage) return;
+  // ── Reprocess page ─────────────────────────────────────────
+  function reprocess(id, mode) {
     setPages((prev) =>
-      prev.map((p) =>
-        p.id === selectedId ? { ...p, dataUrl: p.originalDataUrl } : p
-      )
+      prev.map((p) => {
+        if (p.id !== id) return p;
+        const c = processCanvas(p.rawCanvas, mode);
+        return { ...p, dataUrl: toJpeg(c), mode };
+      })
     );
-    setEnhanceVals({ brt: 100, con: 110, sat: 95, sharpen: 1 });
-    showToast("Reset to original");
   }
 
-  // ── Export PDF ────────────────────────────────────────────────
+  // ── Drag reorder ───────────────────────────────────────────
+  function onDragStart(e, i) { dragSrcRef.current = i; setDragIdx(i); e.dataTransfer.effectAllowed = "move"; }
+  function onDragOver(e, i)  { e.preventDefault(); setDragOverIdx(i); }
+  function onDrop(e, ti) {
+    e.preventDefault();
+    const si = dragSrcRef.current;
+    if (si != null && si !== ti) {
+      setPages((prev) => { const a = [...prev]; const [m] = a.splice(si, 1); a.splice(ti, 0, m); return a; });
+    }
+    clearDrag();
+  }
+  function clearDrag() { setDragOverIdx(null); setDragIdx(null); dragSrcRef.current = null; }
+
+  // ── Apply manual adjustments ───────────────────────────────
+  function applyAdj() {
+    if (!selectedPage) return;
+    const c = document.createElement("canvas");
+    c.width = selectedPage.rawCanvas.width; c.height = selectedPage.rawCanvas.height;
+    const ctx = c.getContext("2d");
+    ctx.filter = `brightness(${adjVals.brt}%) contrast(${adjVals.con}%)`;
+    ctx.drawImage(selectedPage.rawCanvas, 0, 0);
+    ctx.filter = "none";
+    setPages((prev) => prev.map((p) => p.id === selectedId ? { ...p, dataUrl: toJpeg(c) } : p));
+    showToast("Adjustments applied"); setEditMode(null);
+  }
+
+  // ── Export PDF ─────────────────────────────────────────────
   async function exportPDF() {
     if (!pages.length) return;
-    setExportMenuOpen(false);
-    setIsProcessing(true);
-    setProcessingLabel("Building PDF…");
-
-    // Load jsPDF from CDN
-    await new Promise((resolve, reject) => {
-      if (window.jspdf) return resolve();
+    setExportOpen(false); setProcessing(true); setProcLabel("Building PDF…");
+    await new Promise((res, rej) => {
+      if (window.jspdf) return res();
       const s = document.createElement("script");
       s.src = "https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js";
-      s.onload = resolve; s.onerror = reject;
-      document.head.appendChild(s);
+      s.onload = res; s.onerror = rej; document.head.appendChild(s);
     });
-
     const { jsPDF } = window.jspdf;
-
+    let pdf;
     for (let i = 0; i < pages.length; i++) {
-      setProcessingLabel(`Adding page ${i + 1} of ${pages.length}…`);
+      setProcLabel(`Adding page ${i + 1} of ${pages.length}…`);
       const img = new Image();
-      await new Promise((res) => {
-        img.onload = res;
-        img.src = pages[i].dataUrl;
-      });
+      await new Promise((res) => { img.onload = res; img.src = pages[i].dataUrl; });
       const pw = img.naturalWidth, ph = img.naturalHeight;
-      const orientation = pw > ph ? "landscape" : "portrait";
-      if (i === 0) {
-        var pdf = new jsPDF({ orientation, unit: "px", format: [pw, ph] });
-      } else {
-        pdf.addPage([pw, ph], orientation);
-      }
+      const orient = pw > ph ? "landscape" : "portrait";
+      if (i === 0) pdf = new jsPDF({ orientation: orient, unit: "px", format: [pw, ph] });
+      else pdf.addPage([pw, ph], orient);
       pdf.addImage(pages[i].dataUrl, "JPEG", 0, 0, pw, ph);
     }
-
     pdf.save("scanned-document.pdf");
-    setIsProcessing(false);
-    setProcessingLabel("");
-    showToast("PDF downloaded!");
+    setProcessing(false); setProcLabel(""); showToast("PDF saved!");
   }
 
-  // ── Export Images ZIP ─────────────────────────────────────────
-  async function exportImages() {
+  // ── Export ZIP ─────────────────────────────────────────────
+  async function exportZip() {
     if (!pages.length) return;
-    setExportMenuOpen(false);
-    setIsProcessing(true);
-    setProcessingLabel("Preparing images…");
-
-    // Load JSZip
-    await new Promise((resolve, reject) => {
-      if (window.JSZip) return resolve();
+    setExportOpen(false); setProcessing(true); setProcLabel("Zipping images…");
+    await new Promise((res, rej) => {
+      if (window.JSZip) return res();
       const s = document.createElement("script");
       s.src = "https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js";
-      s.onload = resolve; s.onerror = reject;
-      document.head.appendChild(s);
+      s.onload = res; s.onerror = rej; document.head.appendChild(s);
     });
-
     const zip = new window.JSZip();
-    pages.forEach((p, i) => {
-      const base64 = p.dataUrl.split(",")[1];
-      zip.file(`page-${String(i + 1).padStart(3, "0")}.jpg`, base64, { base64: true });
-    });
+    pages.forEach((p, i) => zip.file(`page-${String(i+1).padStart(3,"0")}.jpg`, p.dataUrl.split(",")[1], { base64: true }));
     const blob = await zip.generateAsync({ type: "blob" });
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = "scanned-pages.zip";
-    a.click();
-    setIsProcessing(false);
-    setProcessingLabel("");
-    showToast("Images downloaded!");
+    const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "scanned-pages.zip"; a.click();
+    setProcessing(false); setProcLabel(""); showToast("Images downloaded!");
   }
 
-  // ── Drop zone on page ─────────────────────────────────────────
-  function onPageDrop(e) {
-    e.preventDefault();
-    handleFiles(e.dataTransfer.files);
-  }
-
-  // Close export menu on outside click
+  // Close export on outside click
   useEffect(() => {
-    function handle(e) {
-      if (!e.target.closest(`.${styles.exportWrap}`)) setExportMenuOpen(false);
-    }
-    document.addEventListener("mousedown", handle);
-    return () => document.removeEventListener("mousedown", handle);
+    const fn = (e) => { if (!e.target.closest(`.${styles.exportWrap}`)) setExportOpen(false); };
+    document.addEventListener("mousedown", fn);
+    return () => document.removeEventListener("mousedown", fn);
   }, []);
 
-  // Sync enhance sliders when page selected
-  useEffect(() => {
-    setEnhanceVals({ brt: 100, con: 110, sat: 95, sharpen: 1 });
-  }, [selectedId]);
-
-  // ── Render ────────────────────────────────────────────────────
+  // ── Render ─────────────────────────────────────────────────
   return (
     <div className={styles.homeContainer}>
       <SideBar />
       <div className={styles.mainWrapper}>
         <Header />
-        <main
-          className={styles.mainContent}
-          onDragOver={(e) => e.preventDefault()}
-          onDrop={onPageDrop}
-        >
+        <main className={styles.mainContent}>
           <div className={styles.page}>
 
             {/* Page header */}
@@ -345,44 +364,53 @@ export default function DocumentScanner() {
                 <div className={styles.pageEyebrow}>Student Utilities</div>
                 <div className={styles.pageTitle}>Document <em>Scanner</em></div>
               </div>
-              {pages.length > 0 && (
-                <div className={styles.exportWrap}>
-                  <button
-                    className={`${styles.btn} ${styles.primary}`}
-                    onClick={() => setExportMenuOpen((v) => !v)}
-                  >
-                    <i className="fa-solid fa-file-export"></i>
-                    Export
-                    <i className={`fa-solid fa-chevron-down ${styles.chevron}`}></i>
-                  </button>
-                  {exportMenuOpen && (
-                    <div className={styles.exportMenu}>
-                      <button onClick={exportPDF}>
-                        <i className="fa-solid fa-file-pdf"></i>
-                        Save as PDF
-                        <span>All {pages.length} pages combined</span>
-                      </button>
-                      <button onClick={exportImages}>
-                        <i className="fa-solid fa-images"></i>
-                        Save as Images
-                        <span>ZIP of JPG files</span>
-                      </button>
-                    </div>
-                  )}
+              <div className={styles.headerRight}>
+                {/* Global scan mode */}
+                <div className={styles.modeToggle}>
+                  {[
+                    { k: "bw",     icon: "fa-solid fa-file-lines",        label: "B&W" },
+                    { k: "grey",   icon: "fa-solid fa-circle-half-stroke", label: "Grey" },
+                    { k: "colour", icon: "fa-solid fa-palette",            label: "Colour" },
+                  ].map((m) => (
+                    <button key={m.k}
+                      className={`${styles.modeBtn} ${scanMode === m.k ? styles.modeBtnOn : ""}`}
+                      onClick={() => setScanMode(m.k)}>
+                      <i className={m.icon}></i><span>{m.label}</span>
+                    </button>
+                  ))}
                 </div>
-              )}
+                {pages.length > 0 && (
+                  <div className={styles.exportWrap}>
+                    <button className={`${styles.btn} ${styles.primary}`} onClick={() => setExportOpen((v) => !v)}>
+                      <i className="fa-solid fa-file-export"></i> Export
+                      <i className="fa-solid fa-chevron-down" style={{ fontSize: 9, marginLeft: 2 }}></i>
+                    </button>
+                    {exportOpen && (
+                      <div className={styles.exportMenu}>
+                        <button onClick={exportPDF}>
+                          <i className="fa-solid fa-file-pdf"></i>
+                          <div><span>Save as PDF</span><small>{pages.length} page{pages.length > 1 ? "s" : ""} combined</small></div>
+                        </button>
+                        <button onClick={exportZip}>
+                          <i className="fa-solid fa-images"></i>
+                          <div><span>Save as Images</span><small>ZIP of JPG files</small></div>
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
 
-            {/* Main layout */}
+            {/* Layout */}
             <div className={styles.layout}>
 
-              {/* ── Left: page strip ── */}
+              {/* ── Left strip ── */}
               <div className={styles.strip}>
-                <div className={styles.stripHeader}>
+                <div className={styles.stripHead}>
                   <span>Pages</span>
-                  <span className={styles.pageCount}>{pages.length}</span>
+                  <span className={styles.badge}>{pages.length}</span>
                 </div>
-
                 <div className={styles.stripScroll}>
                   {pages.length === 0 && (
                     <div className={styles.stripEmpty}>
@@ -391,92 +419,62 @@ export default function DocumentScanner() {
                     </div>
                   )}
                   {pages.map((p, i) => (
-                    <div
-                      key={p.id}
-                      className={`${styles.thumb}
-                        ${selectedId === p.id ? styles.thumbActive : ""}
-                        ${dragOverId === p.id ? styles.thumbDragOver : ""}
-                        ${dragId === p.id ? styles.thumbDragging : ""}
-                      `}
+                    <div key={p.id}
                       draggable
-                      onDragStart={(e) => onDragStart(e, p.id, i)}
-                      onDragOver={(e) => onDragOver(e, p.id)}
+                      onDragStart={(e) => onDragStart(e, i)}
+                      onDragOver={(e) => onDragOver(e, i)}
                       onDrop={(e) => onDrop(e, i)}
-                      onDragEnd={onDragEnd}
+                      onDragEnd={clearDrag}
                       onClick={() => { setSelectedId(p.id); setEditMode(null); }}
+                      className={[
+                        styles.thumb,
+                        selectedId === p.id ? styles.thumbOn : "",
+                        dragOverIdx === i   ? styles.thumbOver : "",
+                        dragIdx === i       ? styles.thumbGhost : "",
+                      ].join(" ")}
                     >
-                      <div className={styles.thumbNum}>{i + 1}</div>
-                      <img src={p.dataUrl} alt={`Page ${i + 1}`} />
-                      <div className={styles.thumbOverlay}>
-                        <button
-                          className={styles.thumbDelete}
-                          onClick={(e) => { e.stopPropagation(); deletePage(p.id); }}
-                          title="Delete page"
-                        >
-                          <i className="fa-solid fa-xmark"></i>
-                        </button>
-                      </div>
-                      <div className={styles.thumbDragHandle}>
-                        <i className="fa-solid fa-grip-vertical"></i>
-                      </div>
+                      <span className={styles.thumbNum}>{i + 1}</span>
+                      <img src={p.dataUrl} alt={`Page ${i+1}`} />
+                      <button className={styles.thumbDel}
+                        onClick={(e) => { e.stopPropagation(); deletePage(p.id); }}>
+                        <i className="fa-solid fa-xmark"></i>
+                      </button>
+                      <span className={styles.grip}><i className="fa-solid fa-grip-vertical"></i></span>
                     </div>
                   ))}
                 </div>
-
-                {/* Add buttons */}
-                <div className={styles.addButtons}>
-                  <button
-                    className={`${styles.btn} ${styles.addBtn}`}
-                    onClick={() => fileInputRef.current?.click()}
-                  >
-                    <i className="fa-solid fa-arrow-up-from-bracket"></i>
-                    Upload
+                <div className={styles.addRow}>
+                  <button className={`${styles.btn} ${styles.addBtn}`} onClick={() => fileRef.current?.click()}>
+                    <i className="fa-solid fa-arrow-up-from-bracket"></i> Upload
                   </button>
-                  <button
-                    className={`${styles.btn} ${styles.addBtn}`}
-                    onClick={openCamera}
-                  >
-                    <i className="fa-solid fa-camera"></i>
-                    Camera
+                  <button className={`${styles.btn} ${styles.addBtn}`} onClick={openCamera}>
+                    <i className="fa-solid fa-camera"></i> Camera
                   </button>
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept="image/*"
-                    multiple
-                    style={{ display: "none" }}
-                    onChange={(e) => handleFiles(e.target.files)}
-                  />
+                  <input ref={fileRef} type="file" accept="image/*" multiple
+                    style={{ display: "none" }} onChange={(e) => handleFiles(e.target.files)} />
                 </div>
               </div>
 
-              {/* ── Right: viewer / editor ── */}
+              {/* ── Right viewer ── */}
               <div className={styles.viewer}>
                 {!selectedPage ? (
-                  <div
-                    className={styles.dropZone}
-                    onClick={() => fileInputRef.current?.click()}
+                  <div className={styles.dropZone}
+                    onClick={() => fileRef.current?.click()}
                     onDragOver={(e) => e.preventDefault()}
-                    onDrop={(e) => { e.preventDefault(); handleFiles(e.dataTransfer.files); }}
-                  >
-                    <div className={styles.dropIcon}>
-                      <i className="fa-solid fa-scanner-image"></i>
-                    </div>
+                    onDrop={(e) => { e.preventDefault(); handleFiles(e.dataTransfer.files); }}>
+                    <div className={styles.dropIco}><i className="fa-solid fa-file-magnifying-glass"></i></div>
                     <div className={styles.dropTitle}>Drop documents here</div>
                     <div className={styles.dropSub}>
-                      or click to upload · JPG, PNG, HEIC · multiple files supported
+                      JPG · PNG · HEIC · multiple files<br/>
+                      Auto-enhanced like CamScanner
                     </div>
-                    <div className={styles.dropActions}>
-                      <button
-                        className={`${styles.btn} ${styles.primary}`}
-                        onClick={(e) => { e.stopPropagation(); fileInputRef.current?.click(); }}
-                      >
+                    <div className={styles.dropBtns}>
+                      <button className={`${styles.btn} ${styles.primary}`}
+                        onClick={(e) => { e.stopPropagation(); fileRef.current?.click(); }}>
                         <i className="fa-solid fa-arrow-up-from-bracket"></i> Choose Files
                       </button>
-                      <button
-                        className={`${styles.btn} ${styles.ghost}`}
-                        onClick={(e) => { e.stopPropagation(); openCamera(); }}
-                      >
+                      <button className={`${styles.btn} ${styles.ghost}`}
+                        onClick={(e) => { e.stopPropagation(); openCamera(); }}>
                         <i className="fa-solid fa-camera"></i> Use Camera
                       </button>
                     </div>
@@ -485,100 +483,74 @@ export default function DocumentScanner() {
                   <div className={styles.editorWrap}>
                     {/* Toolbar */}
                     <div className={styles.toolbar}>
-                      <div className={styles.toolbarLeft}>
-                        <span className={styles.pageName}>{selectedPage.name}</span>
-                        <span className={styles.pageIndex}>
-                          Page {pages.findIndex((p) => p.id === selectedId) + 1} of {pages.length}
-                        </span>
+                      <div className={styles.tbL}>
+                        <span className={styles.docName}>{selectedPage.name}</span>
+                        <span className={styles.docIdx}>{pages.findIndex((p) => p.id === selectedId) + 1} / {pages.length}</span>
                       </div>
-                      <div className={styles.toolbarRight}>
-                        <button
-                          className={`${styles.toolBtn} ${editMode === "enhance" ? styles.toolBtnActive : ""}`}
-                          onClick={() => setEditMode(editMode === "enhance" ? null : "enhance")}
-                        >
-                          <i className="fa-solid fa-sliders"></i> Enhance
+                      <div className={styles.tbR}>
+                        {/* Per-page mode switcher */}
+                        <div className={styles.modeMini}>
+                          {[{k:"bw",l:"B&W"},{k:"grey",l:"Grey"},{k:"colour",l:"Colour"}].map((m) => (
+                            <button key={m.k}
+                              className={`${styles.miniBtn} ${selectedPage.mode === m.k ? styles.miniBtnOn : ""}`}
+                              onClick={() => reprocess(selectedId, m.k)}>{m.l}</button>
+                          ))}
+                        </div>
+                        <button className={`${styles.toolBtn} ${editMode === "enhance" ? styles.toolBtnOn : ""}`}
+                          onClick={() => setEditMode(editMode === "enhance" ? null : "enhance")}>
+                          <i className="fa-solid fa-sliders"></i> Adjust
                         </button>
-                        <button
-                          className={`${styles.toolBtn} ${styles.toolBtnDanger}`}
-                          onClick={() => deletePage(selectedId)}
-                        >
+                        <button className={`${styles.toolBtn} ${styles.danger}`}
+                          onClick={() => deletePage(selectedId)}>
                           <i className="fa-solid fa-trash"></i>
                         </button>
                       </div>
                     </div>
 
-                    {/* Enhance panel */}
+                    {/* Adjust panel */}
                     {editMode === "enhance" && (
-                      <div className={styles.enhancePanel}>
+                      <div className={styles.adjPanel}>
                         {[
-                          { key: "brt", label: "Brightness", min: 50, max: 200, suffix: "%" },
-                          { key: "con", label: "Contrast",   min: 50, max: 200, suffix: "%" },
-                          { key: "sat", label: "Saturation", min: 0,  max: 200, suffix: "%" },
+                          { k: "brt", label: "Brightness", min: 50, max: 200, suffix: "%" },
+                          { k: "con", label: "Contrast",   min: 50, max: 200, suffix: "%" },
                         ].map((sl) => (
-                          <div className={styles.sliderRow} key={sl.key}>
+                          <div className={styles.slRow} key={sl.k}>
                             <span className={styles.slLabel}>{sl.label}</span>
-                            <input
-                              type="range"
-                              min={sl.min}
-                              max={sl.max}
-                              value={enhanceVals[sl.key]}
-                              onChange={(e) =>
-                                setEnhanceVals((v) => ({ ...v, [sl.key]: Number(e.target.value) }))
-                              }
-                            />
-                            <span className={styles.slVal}>{enhanceVals[sl.key]}{sl.suffix}</span>
+                            <input type="range" min={sl.min} max={sl.max} value={adjVals[sl.k]}
+                              onChange={(e) => setAdjVals((v) => ({ ...v, [sl.k]: Number(e.target.value) }))} />
+                            <span className={styles.slVal}>{adjVals[sl.k]}{sl.suffix}</span>
                           </div>
                         ))}
-                        <div className={styles.enhanceActions}>
-                          <button className={`${styles.btn} ${styles.ghost} ${styles.btnSm}`} onClick={resetEnhance}>
-                            Reset
-                          </button>
-                          <button className={`${styles.btn} ${styles.primary} ${styles.btnSm}`} onClick={applyEnhance}>
-                            Apply
-                          </button>
+                        <div className={styles.adjActions}>
+                          <button className={`${styles.btn} ${styles.ghost} ${styles.sm}`}
+                            onClick={() => { setAdjVals({ brt: 100, con: 110 }); setEditMode(null); }}>Reset</button>
+                          <button className={`${styles.btn} ${styles.primary} ${styles.sm}`} onClick={applyAdj}>Apply</button>
                         </div>
                       </div>
                     )}
 
-                    {/* Image preview */}
-                    <div
-                      className={styles.imageWrap}
-                      style={editMode === "enhance" ? {
-                        filter: `brightness(${enhanceVals.brt}%) contrast(${enhanceVals.con}%) saturate(${enhanceVals.sat}%)`
-                      } : {}}
-                    >
-                      <img src={selectedPage.dataUrl} alt="Selected page" />
+                    {/* Image */}
+                    <div className={styles.imgWrap}>
+                      <img src={selectedPage.dataUrl} alt="Scanned page" />
                     </div>
 
-                    {/* Nav arrows */}
+                    {/* Nav */}
                     <div className={styles.navBar}>
-                      <button
-                        className={styles.navBtn}
+                      <button className={styles.navBtn}
                         disabled={pages.findIndex((p) => p.id === selectedId) === 0}
-                        onClick={() => {
-                          const idx = pages.findIndex((p) => p.id === selectedId);
-                          if (idx > 0) { setSelectedId(pages[idx - 1].id); setEditMode(null); }
-                        }}
-                      >
+                        onClick={() => { const i = pages.findIndex((p) => p.id === selectedId); if (i > 0) { setSelectedId(pages[i-1].id); setEditMode(null); } }}>
                         <i className="fa-solid fa-chevron-left"></i> Prev
                       </button>
-                      <span className={styles.navDots}>
-                        {pages.map((p, i) => (
-                          <span
-                            key={p.id}
-                            className={`${styles.dot} ${p.id === selectedId ? styles.dotActive : ""}`}
-                            onClick={() => { setSelectedId(p.id); setEditMode(null); }}
-                          />
+                      <div className={styles.dots}>
+                        {pages.map((p) => (
+                          <span key={p.id}
+                            className={`${styles.dot} ${p.id === selectedId ? styles.dotOn : ""}`}
+                            onClick={() => { setSelectedId(p.id); setEditMode(null); }} />
                         ))}
-                      </span>
-                      <button
-                        className={styles.navBtn}
+                      </div>
+                      <button className={styles.navBtn}
                         disabled={pages.findIndex((p) => p.id === selectedId) === pages.length - 1}
-                        onClick={() => {
-                          const idx = pages.findIndex((p) => p.id === selectedId);
-                          if (idx < pages.length - 1) { setSelectedId(pages[idx + 1].id); setEditMode(null); }
-                        }}
-                      >
+                        onClick={() => { const i = pages.findIndex((p) => p.id === selectedId); if (i < pages.length - 1) { setSelectedId(pages[i+1].id); setEditMode(null); } }}>
                         Next <i className="fa-solid fa-chevron-right"></i>
                       </button>
                     </div>
@@ -590,40 +562,45 @@ export default function DocumentScanner() {
 
           {/* ── Camera modal ── */}
           {cameraOpen && (
-            <div className={styles.modalOverlay}>
-              <div className={styles.cameraModal}>
-                <div className={styles.cameraHeader}>
+            <div className={styles.overlay}>
+              <div className={styles.camModal}>
+                <div className={styles.camHead}>
                   <span>Camera</span>
-                  <button className={styles.closeBtn} onClick={closeCamera}>
-                    <i className="fa-solid fa-xmark"></i>
-                  </button>
+                  <button className={styles.camClose} onClick={closeCamera}><i className="fa-solid fa-xmark"></i></button>
                 </div>
-                <div className={styles.cameraBody}>
-                  <video ref={videoRef} className={styles.cameraVideo} playsInline muted />
-                  <div className={styles.cameraGuide} />
+                <div className={styles.camBody}>
+                  <video ref={videoRef} className={styles.camVideo} playsInline muted />
+                  <div className={styles.camGuide} />
                 </div>
-                <div className={styles.cameraFooter}>
-                  <button className={styles.captureBtn} onClick={captureCamera}>
-                    <span className={styles.captureRing} />
+                <div className={styles.camFoot}>
+                  <div className={styles.camModes}>
+                    {[{k:"bw",l:"B&W"},{k:"grey",l:"Grey"},{k:"colour",l:"Colour"}].map((m) => (
+                      <button key={m.k}
+                        className={`${styles.camModeBtn} ${scanMode === m.k ? styles.camModeBtnOn : ""}`}
+                        onClick={() => setScanMode(m.k)}>{m.l}</button>
+                    ))}
+                  </div>
+                  <button className={styles.shutter} onClick={capturePhoto}>
+                    <span className={styles.shutterInner} />
                   </button>
                 </div>
               </div>
             </div>
           )}
 
-          {/* ── Processing overlay ── */}
-          {isProcessing && (
-            <div className={styles.processingOverlay}>
-              <div className={styles.processingCard}>
+          {/* ── Processing ── */}
+          {processing && (
+            <div className={styles.overlay}>
+              <div className={styles.procCard}>
                 <div className={styles.spinner} />
-                <div className={styles.processingLabel}>{processingLabel}</div>
+                <span>{procLabel}</span>
               </div>
             </div>
           )}
 
           {/* ── Toast ── */}
           {toast && (
-            <div className={`${styles.toast} ${styles[`toast_${toast.type}`]}`}>
+            <div className={`${styles.toast} ${toast.type === "error" ? styles.toastErr : ""}`}>
               <i className={`fa-solid ${toast.type === "error" ? "fa-circle-xmark" : "fa-circle-check"}`}></i>
               {toast.msg}
             </div>
