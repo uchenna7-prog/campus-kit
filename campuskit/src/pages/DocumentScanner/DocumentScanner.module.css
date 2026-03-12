@@ -1,4 +1,4 @@
-/* ── Variables (mirrors exact app tokens) ─────────────────────── */
+/* ── Variables (exact app tokens) ────────────────────────────── */
 :root {
   --white:     #ffffff;
   --off-white: #f7f7f5;
@@ -17,25 +17,17 @@
 
 /* ── Shells ───────────────────────────────────────────────────── */
 .homeContainer {
-  display: flex;
-  min-height: 100vh;
-  width: 100%;
-  background-color: var(--off-white);
-  margin: 0; padding: 0; box-sizing: border-box;
+  display: flex; min-height: 100vh; width: 100%;
+  background-color: var(--off-white); margin: 0; padding: 0; box-sizing: border-box;
 }
 .mainWrapper {
   flex: 1; display: flex; flex-direction: column;
   min-width: 0; background-color: var(--off-white);
 }
-.mainContent {
-  flex: 1; overflow-y: auto; padding-top: 56px;
-}
+.mainContent { flex: 1; overflow-y: auto; padding-top: 56px; }
 
 /* ── Page ─────────────────────────────────────────────────────── */
-.page {
-  padding: 24px 24px 80px;
-  max-width: 1200px;
-}
+.page { padding: 24px 24px 80px; max-width: 1200px; }
 
 @keyframes rise {
   from { opacity: 0; transform: translateY(10px); }
@@ -43,110 +35,106 @@
 }
 
 /* ── Page Header ─────────────────────────────────────────────── */
-.pageHeader {
-  margin-bottom: 20px;
-  animation: rise 0.4s ease both;
-}
+.pageHeader { margin-bottom: 18px; animation: rise 0.4s ease both; }
 .pageEyebrow {
   font-size: 10.5px; font-weight: 600; color: var(--gray-400);
   letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 4px;
 }
 .pageTitle {
   font-family: 'Instrument Serif', serif;
-  font-size: clamp(1.4rem, 3vw, 1.8rem);
-  font-weight: 400; color: var(--black);
-  letter-spacing: -0.02em; line-height: 1.2; margin: 0;
+  font-size: clamp(1.4rem, 3vw, 1.8rem); font-weight: 400;
+  color: var(--black); letter-spacing: -0.02em; line-height: 1.2; margin: 0;
 }
 .pageTitle em { font-style: italic; color: var(--gray-400); }
 
-/* ── Toolbar row ─────────────────────────────────────────────── */
-.toolRow {
-  display: flex; align-items: center; gap: 10px;
-  flex-wrap: wrap; margin-bottom: 16px;
+/* ── Controls bar ────────────────────────────────────────────── */
+.controlsBar {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 10px; flex-wrap: wrap; margin-bottom: 14px;
   animation: rise 0.4s 0.05s ease both;
 }
+.controlsLeft { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 
 /* AI toggle */
-.aiToggleWrap {}
 .aiToggle {
-  display: flex; align-items: center; gap: 6px;
+  display: inline-flex; align-items: center; gap: 6px;
   padding: 5px 12px; border-radius: var(--radius);
   border: 1px solid var(--gray-200); background: var(--white);
   font-size: 11px; font-weight: 600; color: var(--gray-600);
-  cursor: pointer; transition: all 0.15s; font-family: inherit;
-  letter-spacing: 0.01em;
+  cursor: pointer; transition: all 0.15s; font-family: inherit; letter-spacing: 0.01em;
 }
-.aiToggle:hover { border-color: var(--gray-300); color: var(--ink); }
-.aiToggleOn {
-  background: var(--ink) !important;
-  border-color: var(--ink) !important;
-  color: var(--white) !important;
-}
-.aiDot {
-  width: 6px; height: 6px; border-radius: 50%;
-  background: var(--gray-300); flex-shrink: 0; transition: background 0.15s;
-}
+.aiToggle:hover { border-color: var(--gray-400); color: var(--ink); }
+.aiToggleOn { background: var(--ink) !important; border-color: var(--ink) !important; color: var(--white) !important; }
+.aiDot { width: 6px; height: 6px; border-radius: 50%; background: var(--gray-300); flex-shrink: 0; transition: background 0.15s; }
 .aiToggleOn .aiDot { background: #4ade80; }
 
-/* Scan mode toggle */
+/* Mode toggle */
 .modeToggle {
   display: flex; background: var(--white); border: 1px solid var(--gray-100);
   border-radius: var(--radius); padding: 3px; gap: 2px;
-  box-shadow: 0 1px 3px rgba(15,15,14,.04);
 }
 .modeBtn {
-  background: none; border: none; padding: 4px 11px; border-radius: 7px;
-  font-size: 11.5px; font-weight: 500; color: var(--gray-600);
+  background: none; border: none; padding: 4px 10px; border-radius: 7px;
+  font-size: 11px; font-weight: 500; color: var(--gray-600);
   cursor: pointer; display: flex; align-items: center; gap: 5px;
   transition: all .15s; white-space: nowrap; font-family: inherit;
 }
 .modeBtn:hover { background: var(--gray-50); color: var(--ink); }
 .modeBtnOn { background: var(--ink) !important; color: var(--white) !important; }
 
-/* Export */
-.exportWrap { position: relative; margin-left: auto; }
-.exportMenu {
-  position: absolute; top: calc(100% + 6px); right: 0;
+/* Export wrap — just the button, no dropdown inline */
+.exportWrap {}
+
+/* ── Export panel — fixed, always on top ─────────────────────── */
+.exportBackdrop {
+  position: fixed; inset: 0; z-index: 998;
+}
+.exportPanel {
+  position: fixed; bottom: 80px; right: 24px;
   background: var(--white); border: 1px solid var(--gray-100);
-  border-radius: var(--radius-lg); min-width: 200px; overflow: hidden;
-  z-index: 50; box-shadow: 0 8px 24px rgba(15,15,14,.10);
-  animation: rise .15s ease both;
+  border-radius: var(--radius-lg); width: 280px; overflow: hidden;
+  z-index: 999; box-shadow: 0 12px 40px rgba(15,15,14,.14);
+  animation: rise .2s ease both;
 }
-.exportMenu button {
-  width: 100%; background: none; border: none; padding: 11px 14px;
-  text-align: left; cursor: pointer; color: var(--ink);
-  display: flex; align-items: center; gap: 10px;
-  transition: background .12s; font-family: inherit;
+.exportPanelTitle {
+  padding: 11px 16px 9px; font-size: 10px; font-weight: 700;
+  letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--gray-400); border-bottom: 1px solid var(--gray-100);
+  background: var(--gray-50);
 }
-.exportMenu button div { display: flex; flex-direction: column; }
-.exportMenu button span { font-size: 13px; font-weight: 500; }
-.exportMenu button small { font-size: 11px; color: var(--gray-400); margin-top: 1px; }
-.exportMenu button i { color: var(--ink); font-size: 14px; width: 14px; flex-shrink: 0; }
-.exportMenu button:hover { background: var(--gray-50); }
-.exportMenu button + button { border-top: 1px solid var(--gray-100); }
+.exportOption {
+  width: 100%; background: none; border: none; padding: 13px 16px;
+  text-align: left; cursor: pointer; display: flex; align-items: center;
+  gap: 12px; transition: background .12s; font-family: inherit;
+}
+.exportOption:hover { background: var(--gray-50); }
+.exportOption + .exportOption { border-top: 1px solid var(--gray-100); }
+.exportOptionIcon {
+  width: 34px; height: 34px; border-radius: 8px; background: var(--gray-50);
+  border: 1px solid var(--gray-100); display: flex; align-items: center;
+  justify-content: center; font-size: 14px; color: var(--ink); flex-shrink: 0;
+}
+.exportOptionText { display: flex; flex-direction: column; }
+.exportOptionText span { font-size: 13px; font-weight: 600; color: var(--ink); }
+.exportOptionText small { font-size: 11px; color: var(--gray-400); margin-top: 1px; }
 
 /* ── Layout ───────────────────────────────────────────────────── */
 .layout {
-  display: grid;
-  grid-template-columns: 186px 1fr;
-  gap: 12px;
-  height: calc(100vh - 210px);
-  min-height: 480px;
+  display: grid; grid-template-columns: 182px 1fr;
+  gap: 12px; height: calc(100vh - 200px); min-height: 460px;
   animation: rise 0.4s 0.08s ease both;
 }
 
 /* ── Left strip ───────────────────────────────────────────────── */
 .strip {
   background: var(--white); border: 1px solid var(--gray-100);
-  border-radius: var(--radius-lg); display: flex; flex-direction: column;
-  overflow: hidden; box-shadow: 0 1px 4px rgba(15,15,14,.04);
+  border-radius: var(--radius-lg); display: flex; flex-direction: column; overflow: hidden;
 }
 .stripHead {
   display: flex; align-items: center; justify-content: space-between;
   padding: 10px 12px 8px; border-bottom: 1px solid var(--gray-100);
   font-size: 10px; font-weight: 700; letter-spacing: 0.08em;
-  text-transform: uppercase; color: var(--gray-400);
-  background: var(--gray-50);
+  text-transform: uppercase; color: var(--gray-400); background: var(--gray-50);
 }
 .badge {
   background: var(--ink); color: var(--white);
@@ -157,7 +145,6 @@
 }
 .stripScroll::-webkit-scrollbar { width: 3px; }
 .stripScroll::-webkit-scrollbar-thumb { background: var(--gray-100); border-radius: 2px; }
-
 .stripEmpty {
   flex: 1; display: flex; flex-direction: column; align-items: center;
   justify-content: center; gap: 8px; text-align: center; padding: 20px 10px;
@@ -176,7 +163,6 @@
 .thumbOn   { border-color: var(--ink) !important; }
 .thumbOver { border-color: var(--gray-400) !important; transform: scale(1.02); }
 .thumbGhost { opacity: .35; }
-
 .thumbNum {
   position: absolute; top: 4px; left: 5px;
   background: rgba(15,15,14,.6); color: var(--white);
@@ -204,15 +190,12 @@
 }
 
 /* ── Add row ──────────────────────────────────────────────────── */
-.addRow {
-  display: flex; gap: 5px; padding: 8px; border-top: 1px solid var(--gray-100);
-}
+.addRow { display: flex; gap: 5px; padding: 8px; border-top: 1px solid var(--gray-100); }
 
 /* ── Viewer ───────────────────────────────────────────────────── */
 .viewer {
   background: var(--white); border: 1px solid var(--gray-100);
-  border-radius: var(--radius-lg); overflow: hidden; display: flex;
-  flex-direction: column; box-shadow: 0 1px 4px rgba(15,15,14,.04);
+  border-radius: var(--radius-lg); overflow: hidden; display: flex; flex-direction: column;
 }
 
 /* ── Drop zone ────────────────────────────────────────────────── */
@@ -226,13 +209,13 @@
 .dropIco {
   width: 68px; height: 68px; border-radius: 18px; background: var(--gray-50);
   border: 1px solid var(--gray-100); display: flex; align-items: center;
-  justify-content: center; font-size: 26px; color: var(--gray-400); margin-bottom: 6px;
+  justify-content: center; font-size: 26px; color: var(--gray-400); margin-bottom: 4px;
 }
 .dropTitle {
   font-family: 'Instrument Serif', serif;
-  font-size: 1.2rem; font-weight: 400; color: var(--black); margin: 0;
+  font-size: 1.15rem; font-weight: 400; color: var(--black); margin: 0;
 }
-.dropSub { font-size: 12.5px; color: var(--gray-400); line-height: 1.6; margin: 0; }
+.dropSub  { font-size: 12px; color: var(--gray-400); line-height: 1.65; margin: 0; }
 .dropBtns { display: flex; gap: 8px; margin-top: 6px; }
 
 /* ── Editor ───────────────────────────────────────────────────── */
@@ -240,8 +223,8 @@
 
 .toolbar {
   display: flex; align-items: center; justify-content: space-between;
-  padding: 10px 14px; border-bottom: 1px solid var(--gray-100); gap: 10px;
-  background: var(--gray-50);
+  padding: 10px 14px; border-bottom: 1px solid var(--gray-100);
+  gap: 10px; background: var(--gray-50);
 }
 .tbL { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .tbR { display: flex; align-items: center; gap: 5px; flex-shrink: 0; }
@@ -251,9 +234,8 @@
 }
 .docIdx { font-size: 11px; color: var(--gray-400); white-space: nowrap; }
 .aiBadge {
-  background: var(--ink); color: var(--white);
-  font-size: 9px; font-weight: 700; border-radius: 4px;
-  padding: 2px 5px; letter-spacing: 0.04em; flex-shrink: 0;
+  background: var(--ink); color: var(--white); font-size: 9px; font-weight: 700;
+  border-radius: 4px; padding: 2px 5px; letter-spacing: 0.04em; flex-shrink: 0;
 }
 
 /* Per-page mode */
@@ -298,7 +280,7 @@
 }
 .imgWrap img {
   max-width: 100%; max-height: 100%; object-fit: contain; display: block;
-  border-radius: 3px; box-shadow: 0 2px 12px rgba(15,15,14,.10);
+  border-radius: 2px; box-shadow: 0 2px 12px rgba(15,15,14,.08);
 }
 
 /* Nav */
@@ -316,26 +298,19 @@
 .btn {
   border: none; padding: 7px 10px; border-radius: var(--radius);
   font-weight: 600; font-size: 11px; letter-spacing: 0.02em; cursor: pointer;
-  transition: opacity .15s, transform .1s; display: flex; align-items: center;
+  transition: opacity .15s, transform .1s; display: inline-flex; align-items: center;
   justify-content: center; gap: 5px; white-space: nowrap; font-family: inherit;
 }
 .btn:hover  { opacity: 0.87; }
 .btn:active { transform: scale(0.97); }
 .btn:disabled { opacity: 0.35; cursor: not-allowed; }
-
 .btnInk    { background: var(--ink); color: var(--white); }
-.btnPrimary { background: var(--ink); color: var(--white); }
-.btnOutline {
-  background: var(--white); color: var(--ink);
-  border: 1px solid var(--gray-200) !important;
-}
+.btnOutline { background: var(--white); color: var(--ink); border: 1px solid var(--gray-200) !important; }
 .btnOutline:hover { background: var(--gray-50); opacity: 1; }
 .btnSm { font-size: 10.5px !important; padding: 5px 10px !important; }
+.addBtn { flex: 1; font-size: 10.5px !important; padding: 6px 5px !important; gap: 4px !important; }
 
-/* addBtn = fills strip footer */
-.addBtn { flex: 1; font-size: 10.5px !important; padding: 6px 6px !important; gap: 4px !important; }
-
-/* ── Camera modal ─────────────────────────────────────────────── */
+/* ── Overlay ──────────────────────────────────────────────────── */
 .overlay {
   position: fixed; inset: 0; background: rgba(15,15,14,.65);
   z-index: 100; display: flex; align-items: center; justify-content: center;
@@ -343,6 +318,7 @@
 }
 @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
 
+/* ── Camera modal ─────────────────────────────────────────────── */
 .camModal {
   background: var(--white); border-radius: var(--radius-lg);
   width: min(500px, 95vw); overflow: hidden;
@@ -352,8 +328,7 @@
 .camHead {
   display: flex; align-items: center; justify-content: space-between;
   padding: 12px 16px; border-bottom: 1px solid var(--gray-100);
-  font-size: 13px; font-weight: 600; color: var(--ink);
-  background: var(--gray-50);
+  font-size: 12.5px; font-weight: 600; color: var(--ink); background: var(--gray-50);
 }
 .camClose {
   background: var(--gray-100); border: none; color: var(--gray-600);
@@ -365,8 +340,8 @@
 .camBody { position: relative; background: var(--black); aspect-ratio: 4/3; overflow: hidden; }
 .camVideo { width: 100%; height: 100%; object-fit: cover; display: block; }
 .camGuide {
-  position: absolute; inset: 14px;
-  border: 2px solid rgba(255,255,255,.5); border-radius: 6px; pointer-events: none;
+  position: absolute; inset: 12px; border: 2px solid rgba(255,255,255,.5);
+  border-radius: 6px; pointer-events: none;
 }
 .camGuide::before, .camGuide::after {
   content: ""; position: absolute; width: 18px; height: 18px;
@@ -374,7 +349,11 @@
 }
 .camGuide::before { top: -2px; left: -2px; border-width: 3px 0 0 3px; border-radius: 3px 0 0 0; }
 .camGuide::after  { bottom: -2px; right: -2px; border-width: 0 3px 3px 0; border-radius: 0 0 3px 0; }
-
+.camHint {
+  position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%);
+  background: rgba(15,15,14,.55); color: var(--white); font-size: 10.5px;
+  padding: 4px 10px; border-radius: 20px; white-space: nowrap; pointer-events: none;
+}
 .camFoot {
   display: flex; flex-direction: column; align-items: center; gap: 12px;
   padding: 16px; background: var(--gray-50); border-top: 1px solid var(--gray-100);
@@ -387,7 +366,6 @@
 }
 .camModeBtn:hover { border-color: var(--gray-400); color: var(--ink); }
 .camModeBtnOn { background: var(--ink) !important; border-color: var(--ink) !important; color: var(--white) !important; }
-
 .shutter {
   width: 58px; height: 58px; border-radius: 50%; background: var(--white);
   border: 4px solid var(--gray-300); cursor: pointer;
@@ -400,10 +378,9 @@
 
 /* ── Processing card ──────────────────────────────────────────── */
 .procCard {
-  background: var(--white); border-radius: var(--radius-lg);
-  padding: 24px 32px; display: flex; flex-direction: column; align-items: center;
-  gap: 12px; box-shadow: 0 8px 30px rgba(15,15,14,.12); animation: rise .2s ease both;
-  min-width: 260px;
+  background: var(--white); border-radius: var(--radius-lg); padding: 24px 32px;
+  display: flex; flex-direction: column; align-items: center; gap: 12px;
+  box-shadow: 0 8px 30px rgba(15,15,14,.12); animation: rise .2s ease both; min-width: 260px;
 }
 .procTop { display: flex; align-items: center; gap: 12px; }
 .spinner {
@@ -413,14 +390,9 @@
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 .procLabel { font-size: 12.5px; font-weight: 500; color: var(--ink); }
-.progTrack {
-  width: 100%; height: 3px; background: var(--gray-100); border-radius: 2px; overflow: hidden;
-}
-.progFill {
-  height: 100%; background: var(--ink); border-radius: 2px;
-  transition: width .25s ease; min-width: 4px;
-}
-.procPct { font-size: 10.5px; color: var(--gray-400); font-weight: 600; }
+.progTrack { width: 100%; height: 3px; background: var(--gray-100); border-radius: 2px; overflow: hidden; }
+.progFill  { height: 100%; background: var(--ink); border-radius: 2px; transition: width .25s ease; min-width: 4px; }
+.procPct   { font-size: 10.5px; color: var(--gray-400); font-weight: 600; }
 
 /* ── Toast ────────────────────────────────────────────────────── */
 .toast {
@@ -437,13 +409,13 @@
 @media (max-width: 768px) {
   .page { padding: 16px 12px 80px; }
   .layout { grid-template-columns: 1fr; grid-template-rows: auto 1fr; height: auto; }
-  .strip { max-height: 160px; }
+  .strip { max-height: 155px; }
   .stripScroll { flex-direction: row; flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden; padding: 6px; }
-  .thumb { width: 72px; height: 96px; flex-shrink: 0; aspect-ratio: unset; }
+  .thumb { width: 70px; height: 94px; flex-shrink: 0; aspect-ratio: unset; }
   .viewer { min-height: 400px; }
   .dropBtns { flex-direction: column; align-items: center; }
-  .toolRow { gap: 6px; }
+  .controlsLeft { gap: 6px; }
   .modeBtn span { display: none; }
-  .exportWrap { margin-left: 0; }
+  .exportPanel { right: 12px; bottom: 70px; width: calc(100vw - 24px); }
   .tbR { gap: 4px; }
 }
