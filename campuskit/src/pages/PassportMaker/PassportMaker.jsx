@@ -360,7 +360,7 @@ function PassportMaker() {
     <div className={styles.homeContainer}>
       <SideBar />
       <div className={styles.mainWrapper}>
-        <Header />
+        <Header title="Passport Maker" subtitle="Photo Generator" />
         <main className={styles.mainContent}>
           <div className={styles.page}>
 
