@@ -1,7 +1,7 @@
 import styles from "./Header.module.css";
 import { useSideBarContext } from "../../contexts/SidebarContext";
 
-function Header() {
+function Header({ title = "CGPA Calculator", subtitle = "5.0 Grading Scale" }) {
   const { isMobile, toggleSideBar, isCollapsed } = useSideBarContext();
 
   return (
@@ -17,8 +17,8 @@ function Header() {
           <i className="fa-solid fa-chevron-left"></i>
         </button>
         <div>
-          <div className={styles.topbarTitle}>CGPA Calculator</div>
-          <div className={styles.topbarSub}>5.0 Grading Scale</div>
+          <div className={styles.topbarTitle}>{title}</div>
+          <div className={styles.topbarSub}>{subtitle}</div>
         </div>
       </div>
 
