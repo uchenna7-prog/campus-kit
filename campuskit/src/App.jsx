@@ -1,6 +1,7 @@
 import { Routes, Route, Navigate } from "react-router-dom";
 import CgpaCalculator from "./pages/CgpaCalculator/CgpaCalculator";
 import PassportMaker from "./pages/PassportMaker/PassportMaker";
+import DocumentScanner from "./pages/DocumentScanner/DocumentScanner";
 
 function App() {
   return (
@@ -13,6 +14,7 @@ function App() {
 
       {/* Student Utilities */}
       <Route path="/passport-maker" element={<PassportMaker />} />
+      <Route path="/document-scanner" element={<DocumentScanner />} />
     </Routes>
   );
 }
