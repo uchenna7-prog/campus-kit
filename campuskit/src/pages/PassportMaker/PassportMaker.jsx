@@ -1,6 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import { removeBackground } from "@imgly/background-removal";
 import SideBar from "../../components/Sidebar/Sidebar";
 import Header from "../../components/Header/Header";
 import styles from "./PassportMaker.module.css";
@@ -28,6 +27,8 @@ const BG_SWATCHES = [
   { c: "#f4f4f2", dark: false, border: true },
 ];
 
+const REMOVEBG_API_KEY = "ug3ZUeh9Z4wVzcp4B77pFSUN";
+
 function drawChecker(ctx, w, h, size = 10) {
   for (let y = 0; y < h; y += size)
     for (let x = 0; x < w; x += size) {
@@ -47,10 +48,10 @@ function PassportMaker() {
   // ── Processing state
   const [progress, setProgress] = useState(0);
   const [pTitle, setPTitle] = useState("Removing background…");
-  const [pSub, setPSub] = useState("Running in your browser — no upload needed.");
+  const [pSub, setPSub] = useState("Sending to remove.bg — usually under 5 seconds.");
 
   // ── Editor state
-  const [showBg, setShowBg] = useState(true); // default true so colour is visible immediately
+  const [showBg, setShowBg] = useState(true);
   const [bgColor, setBgColor] = useState("#ffffff");
   const [activeSwatch, setActiveSwatch] = useState("#ffffff");
   const [customColor, setCustomColor] = useState("#ffffff");
@@ -65,7 +66,6 @@ function PassportMaker() {
   // ── Refs
   const fileInputRef = useRef(null);
   const previewCanvasRef = useRef(null);
-  const workCanvasRef = useRef(null);
   const outputCardRef = useRef(null);
   const origImgRef = useRef(null);
   const fgCanvasRef = useRef(null);
@@ -122,9 +122,7 @@ function PassportMaker() {
     const r = new FileReader();
     r.onload = (e) => {
       const img = new Image();
-      img.onload = () => {
-        origImgRef.current = img;
-      };
+      img.onload = () => { origImgRef.current = img; };
       img.src = e.target.result;
     };
     r.readAsDataURL(file);
@@ -145,32 +143,40 @@ function PassportMaker() {
     if (e.dataTransfer.files[0]) handleFileChange(e.dataTransfer.files[0]);
   }
 
-  // ── Background removal via @imgly/background-removal (npm) ───
+  // ── Background removal via remove.bg API ─────────────────────
   async function doRemoval(file) {
     goStep(2);
-    setProgress(10);
-    setPTitle("Loading model…");
-    setPSub("First load takes a few seconds — cached after that.");
+    setProgress(20);
+    setPTitle("Uploading photo…");
+    setPSub("Sending to remove.bg — usually under 5 seconds.");
 
     try {
-      setProgress(40);
-      setPTitle("Analysing photo…");
-      setPSub("Running AI segmentation in your browser.");
+      const formData = new FormData();
+      formData.append("image_file", file);
+      formData.append("size", "auto");
 
-      const resultBlob = await removeBackground(file, {
-        progress: (key, current, total) => {
-          if (total > 0) {
-            const pct = Math.round(40 + (current / total) * 45);
-            setProgress(Math.min(pct, 85));
-          }
+      setProgress(50);
+      setPTitle("Removing background…");
+      setPSub("AI is processing your photo.");
+
+      const response = await fetch("https://api.remove.bg/v1.0/removebg", {
+        method: "POST",
+        headers: {
+          "X-Api-Key": REMOVEBG_API_KEY,
         },
-        output: { format: "image/png", quality: 0.95 },
+        body: formData,
       });
 
-      setProgress(90);
+      if (!response.ok) {
+        const errText = await response.text();
+        throw new Error(`remove.bg error: ${response.status} — ${errText}`);
+      }
+
+      setProgress(85);
       setPTitle("Finalising…");
       setPSub("");
 
+      const resultBlob = await response.blob();
       const url = URL.createObjectURL(resultBlob);
       const img = new Image();
       img.onload = () => {
@@ -183,7 +189,7 @@ function PassportMaker() {
         setProgress(100);
         setTimeout(() => {
           setPreviewSub("Background removed — choose a colour below");
-          setShowBg(true); // show the selected bg colour straight away
+          setShowBg(true);
           goStep(3);
         }, 300);
       };
@@ -213,7 +219,6 @@ function PassportMaker() {
     sc.height = p.h;
     const ctx = sc.getContext("2d");
 
-    // Always fill background colour on the sheet
     ctx.fillStyle = bgColor;
     ctx.fillRect(0, 0, p.w, p.h);
 
@@ -307,7 +312,7 @@ function PassportMaker() {
     setQty(4);
     setProgress(0);
     setPTitle("Removing background…");
-    setPSub("Running in your browser — no upload needed.");
+    setPSub("Sending to remove.bg — usually under 5 seconds.");
     goStep(1);
   }
 
@@ -561,7 +566,7 @@ function PassportMaker() {
                               setBgColor(sw.c);
                               setActiveSwatch(sw.c);
                               setCustomColor(sw.c);
-                              setShowBg(true); // ensure bg is visible when picking a colour
+                              setShowBg(true);
                             }}
                           ></div>
                         ))}
@@ -579,7 +584,7 @@ function PassportMaker() {
                             setBgColor(e.target.value);
                             setCustomColor(e.target.value);
                             setActiveSwatch(null);
-                            setShowBg(true); // ensure bg is visible when picking custom colour
+                            setShowBg(true);
                           }}
                         />
                       </div>
