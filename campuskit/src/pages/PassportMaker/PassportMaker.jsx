@@ -1,359 +1,63 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { removeBackground } from "@imgly/background-removal";
-
 import SideBar from "../../components/Sidebar/Sidebar";
 import Header from "../../components/Header/Header";
-
 import styles from "./PassportMaker.module.css";
 
+// \u2500\u2500 Constants \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
 const PRESETS = {
-  ng: { w: 413, h: 531, label: "NG", dim: "35×45mm" },
-  us: { w: 600, h: 600, label: "US", dim: "51×51mm" },
-  uk: { w: 413, h: 531, label: "UK", dim: "35×45mm" },
-  eu: { w: 413, h: 531, label: "EU", dim: "35×45mm" },
+  ng: { w: 413, h: 531, label: "NG", dim: "35\u00d745mm" },
+  us: { w: 600, h: 600, label: "US", dim: "51\u00d751mm" },
+  uk: { w: 413, h: 531, label: "UK", dim: "35\u00d745mm" },
+  eu: { w: 413, h: 531, label: "EU", dim: "35\u00d745mm" },
 };
 
-function PassportMaker() {
+const BG_SWATCHES = [
+  { c: "#ffffff", dark: false, border: true },
+  { c: "#c8d8f0", dark: false },
+  { c: "#d1fae5", dark: false },
+  { c: "#fef9c3", dark: false },
+  { c: "#ede9fe", dark: false },
+  { c: "#fce7f3", dark: false },
+  { c: "#1e3a5f", dark: true },
+  { c: "#14532d", dark: true },
+  { c: "#4c1d95", dark: true },
+  { c: "#7f1d1d", dark: true },
+  { c: "#1a1a18", dark: true },
+  { c: "#f4f4f2", dark: false, border: true },
+];
 
-  const navigate = useNavigate();
-
-  const [step,setStep] = useState("upload");
-  const [progress,setProgress] = useState(0);
-
-  const [bgColor,setBgColor] = useState("#ffffff");
-  const [showBg,setShowBg] = useState(true);
-
-  const [preset,setPreset] = useState("ng");
-  const [qty,setQty] = useState(4);
-
-  const [sliders,setSliders] = useState({
-    brt:100,
-    con:100
-  });
-
-  const fileInputRef = useRef(null);
-  const previewCanvasRef = useRef(null);
-
-  const fgCanvasRef = useRef(null);
-  const urlRef = useRef(null);
-
-  const origImgRef = useRef(null);
-
-  function goStep(s){
-    setStep(s);
-  }
-
-  // ---------- Background Removal ----------
-
-  async function doRemoval(file){
-
-    goStep("processing");
-
-    setProgress(20);
-
-    try{
-
-      const resultBlob = await removeBackground(file);
-
-      setProgress(80);
-
-      const url = URL.createObjectURL(resultBlob);
-
-      const img = new Image();
-
-      img.onload = ()=>{
-
-        const c = document.createElement("canvas");
-
-        c.width = img.width;
-        c.height = img.height;
-
-        const ctx = c.getContext("2d");
-
-        ctx.drawImage(img,0,0);
-
-        fgCanvasRef.current = c;
-
-        URL.revokeObjectURL(url);
-
-        setProgress(100);
-
-        setTimeout(()=>{
-
-          goStep("editor");
-
-        },300);
-
-      };
-
-      img.src = url;
-
+function drawChecker(ctx, w, h, size = 10) {
+  for (let y = 0; y < h; y += size)
+    for (let x = 0; x < w; x += size) {
+      ctx.fillStyle = (x / size + y / size) % 2 === 0 ? "#e8e8e5" : "#f4f4f2";
+      ctx.fillRect(x, y, size, size);
     }
-    catch(err){
-
-      console.error(err);
-
-      alert("Background removal failed");
-
-      goStep("upload");
-
-    }
-
-  }
-
-  // ---------- File Upload ----------
-
-  function handleFileChange(file){
-
-    if(!file) return;
-
-    const reader = new FileReader();
-
-    reader.onload = e=>{
-
-      const img = new Image();
-
-      img.onload = ()=>{
-
-        origImgRef.current = img;
-
-      };
-
-      img.src = e.target.result;
-
-    };
-
-    reader.readAsDataURL(file);
-
-    doRemoval(file);
-
-  }
-
-  // ---------- Preview Renderer ----------
-
-  const renderPreview = useCallback(()=>{
-
-    const canvas = previewCanvasRef.current;
-
-    if(!canvas || !fgCanvasRef.current) return;
-
-    const p = PRESETS[preset];
-
-    const dispH = 280;
-
-    const dispW = Math.round((dispH * p.w) / p.h);
-
-    canvas.width = dispW;
-    canvas.height = dispH;
-
-    const ctx = canvas.getContext("2d");
-
-    if(showBg){
-
-      ctx.fillStyle = bgColor;
-
-      ctx.fillRect(0,0,dispW,dispH);
-
-    }
-
-    ctx.filter = `brightness(${sliders.brt}%) contrast(${sliders.con}%)`;
-
-    const fg = fgCanvasRef.current;
-
-    const scale = Math.min(dispW/fg.width,dispH/fg.height);
-
-    const dw = fg.width * scale;
-    const dh = fg.height * scale;
-
-    ctx.drawImage(fg,(dispW-dw)/2,(dispH-dh)/2,dw,dh);
-
-    ctx.filter="none";
-
-  },[bgColor,showBg,preset,sliders]);
-
-  useEffect(()=>{
-
-    if(step==="editor"){
-
-      renderPreview();
-
-    }
-
-  },[renderPreview,step]);
-
-  // ---------- Generate Photos ----------
-
-  function generateSheet(){
-
-    if(!fgCanvasRef.current) return;
-
-    const p = PRESETS[preset];
-
-    const sc = document.createElement("canvas");
-
-    sc.width = p.w;
-    sc.height = p.h;
-
-    const ctx = sc.getContext("2d");
-
-    ctx.fillStyle = bgColor;
-
-    ctx.fillRect(0,0,p.w,p.h);
-
-    ctx.filter = `brightness(${sliders.brt}%) contrast(${sliders.con}%)`;
-
-    const fg = fgCanvasRef.current;
-
-    const scale = Math.min(p.w/fg.width,p.h/fg.height);
-
-    const dw = fg.width * scale;
-    const dh = fg.height * scale;
-
-    ctx.drawImage(fg,(p.w-dw)/2,(p.h-dh)/2,dw,dh);
-
-    ctx.filter="none";
-
-    urlRef.current = sc.toDataURL("image/jpeg",0.95);
-
-    downloadSheet();
-
-  }
-
-  // ---------- Download ----------
-
-  function downloadSheet(){
-
-    const p = PRESETS[preset];
-
-    const n = qty;
-
-    const cols = Math.min(n,4);
-    const rows = Math.ceil(n/cols);
-
-    const gap = 14;
-
-    const sheet = document.createElement("canvas");
-
-    sheet.width = cols*p.w + (cols+1)*gap;
-    sheet.height = rows*p.h + (rows+1)*gap;
-
-    const ctx = sheet.getContext("2d");
-
-    ctx.fillStyle="#efefef";
-
-    ctx.fillRect(0,0,sheet.width,sheet.height);
-
-    const img = new Image();
-
-    img.onload = ()=>{
-
-      for(let i=0;i<n;i++){
-
-        const c = i % cols;
-        const r = Math.floor(i/cols);
-
-        ctx.drawImage(
-          img,
-          gap + c*(p.w+gap),
-          gap + r*(p.h+gap),
-          p.w,
-          p.h
-        );
-
-      }
-
-      const a = document.createElement("a");
-
-      a.download="passport-photo.jpg";
-
-      a.href = sheet.toDataURL("image/jpeg",0.95);
-
-      a.click();
-
-    };
-
-    img.src = urlRef.current;
-
-  }
-
-  // ---------- UI ----------
-
-  return(
-
-    <div className={styles.homeContainer}>
-
-      <SideBar/>
-
-      <div className={styles.mainWrapper}>
-
-        <Header/>
-
-        <main className={styles.mainContent}>
-
-          {step==="upload" && (
-
-            <div className={styles.uploadBox}>
-
-              <h2>Upload Photo</h2>
-
-              <button
-                onClick={()=>fileInputRef.current.click()}
-              >
-                Choose Photo
-              </button>
-
-              <input
-                type="file"
-                ref={fileInputRef}
-                accept="image/*"
-                style={{display:"none"}}
-                onChange={(e)=>handleFileChange(e.target.files[0])}
-              />
-
-            </div>
-
-          )}
-
-          {step==="processing" && (
-
-            <div>
-
-              <h2>Removing Background</h2>
-
-              <p>{progress}%</p>
-
-            </div>
-
-          )}
-
-          {step==="editor" && (
-
-            <div>
-
-              <canvas
-                ref={previewCanvasRef}
-                style={{border:"1px solid #ddd"}}
-              />
-
-              <br/>
-
-              <button onClick={generateSheet}>
-                Generate Passport Photos
-              </button>
-
-            </div>
-
-          )}
-
-        </main>
-
-      </div>
-
-    </div>
-
-  );
-
 }
 
-export default PassportMaker;
+// \u2500\u2500 Component \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+function PassportMaker() {
+  const navigate = useNavigate();
+
+  // \u2500\u2500 Step state: "upload" | "processing" | "editor"
+  const [step, setStep] = useState("upload");
+  const [stepNum, setStepNum] = useState(1);
+
+  // \u2500\u2500 Processing state
+  const [progress, setProgress] = useState(0);
+  const [pTitle, setPTitle] = useState("Removing background\u2026");
+  const [pSub, setPSub] = useState("Running in your browser \u2014 no upload needed.");
+
+  // \u2500\u2500 Editor state
+  const [showBg, setShowBg] = useState(true); // default true so colour is visible immediately
+  const [bgColor, setBgColor] = useState("#ffffff");
+  const [activeSwatch, setActiveSwatch] = useState("#ffffff");
+  const [customColor, setCustomColor] = useState("#ffffff");
+  const [preset, setPreset] = useState("ng");
+  const [qty, setQty] = useState(4);
+  const [sliders, setSliders] = useState({ brt: 100, con: 100, shr: 0 });
+  const [previewSub, setPreviewSub] = useState("Background removed");
+  const [outputVisible, setOutputVisible] = useState(false);
+  const [outputSub, setOutputSub] = useState("Ready to download");
+  const [outputThumbs, setOutputThumbs] = useState([]);
