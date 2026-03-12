@@ -65,7 +65,7 @@ export default function SideBar() {
             <span className={styles.navLabel}>Passport Maker</span>
           </Link>
           <Link className={`${styles.navItem} ${isActive("/document-scanner") ? styles.active : ""}`} to="/document-scanner">
-            <i className={`fa-solid fa-camera ${styles.navIcon}`}></i>
+            <i className={`fa-solid fa-file-magnifying-glass ${styles.navIcon}`}></i>
             <span className={styles.navLabel}>Document Scanner</span>
           </Link>
           <Link className={`${styles.navItem} ${isActive("/pdf-tools") ? styles.active : ""}`} to="/pdf-tools">
