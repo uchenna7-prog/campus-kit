@@ -1,917 +1,1112 @@
-import { useState, useRef, useEffect } from "react";
-import SideBar from "../../components/Sidebar/Sidebar";
-import Header from "../../components/Header/Header";
-import styles from "./DocumentScanner.module.css";
+import { useState, useRef, useCallback } from "react";
 
-// ─────────────────────────────────────────────────────────────
-//  CANVAS UTILITIES
-// ─────────────────────────────────────────────────────────────
-const clamp = (v) => Math.max(0, Math.min(255, v));
+const API_KEY = import.meta.env.VITE_ANTHROPIC_API_KEY;
 
-function boxBlur(src, w, h, r) {
-  const tmp = new Float32Array(w * h);
-  const out = new Float32Array(w * h);
-  for (let y = 0; y < h; y++) {
-    let sum = 0;
-    for (let x = 0; x < w; x++) {
-      sum += src[y * w + x];
-      if (x > r) sum -= src[y * w + (x - r - 1)];
-      const cnt = Math.min(x, r) + 1 + Math.min(w - 1 - x, r);
-      tmp[y * w + x] = sum / cnt;
-    }
-  }
-  for (let x = 0; x < w; x++) {
-    let sum = 0;
-    for (let y = 0; y < h; y++) {
-      sum += tmp[y * w + x];
-      if (y > r) sum -= tmp[(y - r - 1) * w + x];
-      const cnt = Math.min(y, r) + 1 + Math.min(h - 1 - y, r);
-      out[y * w + x] = sum / cnt;
-    }
-  }
-  return out;
-}
-
-// ── Canny-like edge detection (simplified) ──
-function edgeDetect(grey, w, h) {
-  const edges = new Uint8Array(w * h);
-  for (let y = 1; y < h - 1; y++) {
-    for (let x = 1; x < w - 1; x++) {
-      const gx =
-        -grey[(y-1)*w+(x-1)] - 2*grey[y*w+(x-1)] - grey[(y+1)*w+(x-1)] +
-         grey[(y-1)*w+(x+1)] + 2*grey[y*w+(x+1)] + grey[(y+1)*w+(x+1)];
-      const gy =
-        -grey[(y-1)*w+(x-1)] - 2*grey[(y-1)*w+x] - grey[(y-1)*w+(x+1)] +
-         grey[(y+1)*w+(x-1)] + 2*grey[(y+1)*w+x] + grey[(y+1)*w+(x+1)];
-      const mag = Math.sqrt(gx*gx + gy*gy);
-      edges[y * w + x] = mag > 30 ? 255 : 0;
-    }
-  }
-  return edges;
-}
-
-// ── Find the largest rectangular contour (document boundary) ──
-// Uses a simplified approach: scan edges to find extreme corners of the document
-function findDocumentCorners(edges, w, h) {
-  // Sample points along the border of the image inward to find the document edge
-  // Strategy: for each of the 4 sides, find the furthest strong-edge row/col
-  const margin = Math.round(Math.min(w, h) * 0.05);
-
-  let top = margin, bottom = h - margin, left = margin, right = w - margin;
-
-  // Find top edge: scan rows from top, find first row with significant edges
-  for (let y = margin; y < h / 2; y++) {
-    let edgeCount = 0;
-    for (let x = margin; x < w - margin; x++) {
-      if (edges[y * w + x] > 0) edgeCount++;
-    }
-    if (edgeCount > (w - 2 * margin) * 0.15) { top = y; break; }
-  }
-  // Find bottom edge
-  for (let y = h - margin; y > h / 2; y--) {
-    let edgeCount = 0;
-    for (let x = margin; x < w - margin; x++) {
-      if (edges[y * w + x] > 0) edgeCount++;
-    }
-    if (edgeCount > (w - 2 * margin) * 0.15) { bottom = y; break; }
-  }
-  // Find left edge
-  for (let x = margin; x < w / 2; x++) {
-    let edgeCount = 0;
-    for (let y = margin; y < h - margin; y++) {
-      if (edges[y * w + x] > 0) edgeCount++;
-    }
-    if (edgeCount > (h - 2 * margin) * 0.15) { left = x; break; }
-  }
-  // Find right edge
-  for (let x = w - margin; x > w / 2; x--) {
-    let edgeCount = 0;
-    for (let y = margin; y < h - margin; y++) {
-      if (edges[y * w + x] > 0) edgeCount++;
-    }
-    if (edgeCount > (h - 2 * margin) * 0.15) { right = x; break; }
-  }
-
-  // Add small padding inside detected boundary
-  const pad = Math.round(Math.min(w, h) * 0.01);
-  return {
-    topLeft:     { x: left + pad,  y: top + pad },
-    topRight:    { x: right - pad, y: top + pad },
-    bottomRight: { x: right - pad, y: bottom - pad },
-    bottomLeft:  { x: left + pad,  y: bottom - pad },
-  };
-}
-
-// ── Perspective transform (4-point → rectangle) ──
-function perspectiveTransform(srcCanvas, corners) {
-  const { topLeft: tl, topRight: tr, bottomRight: br, bottomLeft: bl } = corners;
-
-  const outW = Math.round(Math.max(
-    Math.hypot(tr.x - tl.x, tr.y - tl.y),
-    Math.hypot(br.x - bl.x, br.y - bl.y)
-  ));
-  const outH = Math.round(Math.max(
-    Math.hypot(bl.x - tl.x, bl.y - tl.y),
-    Math.hypot(br.x - tr.x, br.y - tr.y)
-  ));
-
-  if (outW < 50 || outH < 50) return null;
-
-  const dst = document.createElement("canvas");
-  dst.width = outW; dst.height = outH;
-  const ctx = dst.getContext("2d");
-
-  // Bilinear sampling from source
-  const srcCtx = srcCanvas.getContext("2d");
-  const srcData = srcCtx.getImageData(0, 0, srcCanvas.width, srcCanvas.height).data;
-  const dstData = ctx.createImageData(outW, outH);
-  const dd = dstData.data;
-  const sw = srcCanvas.width, sh = srcCanvas.height;
-
-  for (let y = 0; y < outH; y++) {
-    const fy = y / outH;
-    for (let x = 0; x < outW; x++) {
-      const fx = x / outW;
-      // Bilinear interpolation of source coordinates
-      const sx = (1-fx)*(1-fy)*tl.x + fx*(1-fy)*tr.x + fx*fy*br.x + (1-fx)*fy*bl.x;
-      const sy = (1-fx)*(1-fy)*tl.y + fx*(1-fy)*tr.y + fx*fy*br.y + (1-fx)*fy*bl.y;
-
-      const ix = Math.min(Math.max(Math.round(sx), 0), sw - 1);
-      const iy = Math.min(Math.max(Math.round(sy), 0), sh - 1);
-      const si = (iy * sw + ix) * 4;
-      const di = (y * outW + x) * 4;
-      dd[di]   = srcData[si];
-      dd[di+1] = srcData[si+1];
-      dd[di+2] = srcData[si+2];
-      dd[di+3] = 255;
-    }
-  }
-  ctx.putImageData(dstData, 0, 0);
-  return dst;
-}
-
-// ── Adaptive threshold (CamScanner B&W) ──
-function applyBW(canvas) {
-  const ctx = canvas.getContext("2d");
-  const { width: w, height: h } = canvas;
-  const d = ctx.getImageData(0, 0, w, h).data;
-  const grey = new Float32Array(w * h);
-  for (let i = 0; i < w * h; i++) {
-    const p = i * 4;
-    grey[i] = 0.299 * d[p] + 0.587 * d[p+1] + 0.114 * d[p+2];
-  }
-  const r = Math.max(10, Math.round(Math.min(w, h) * 0.06));
-  const mean = boxBlur(grey, w, h, r);
-  const out = ctx.createImageData(w, h);
-  const od = out.data;
-  for (let i = 0; i < w * h; i++) {
-    const v = grey[i] < mean[i] - 12 ? 0 : 255;
-    const p = i * 4;
-    od[p] = od[p+1] = od[p+2] = v; od[p+3] = 255;
-  }
-  ctx.putImageData(out, 0, 0);
-}
-
-function applyGrey(canvas) {
-  const ctx = canvas.getContext("2d");
-  const id = ctx.getImageData(0, 0, canvas.width, canvas.height);
-  const d = id.data;
-  let lo = 255, hi = 0;
-  for (let i = 0; i < d.length; i += 4) {
-    const v = 0.299*d[i] + 0.587*d[i+1] + 0.114*d[i+2];
-    if (v < lo) lo = v; if (v > hi) hi = v;
-  }
-  const range = hi - lo || 1;
-  for (let i = 0; i < d.length; i += 4) {
-    let v = ((0.299*d[i] + 0.587*d[i+1] + 0.114*d[i+2]) - lo) / range * 255;
-    v = clamp((v/255 - 0.5) * 1.3 + 0.5) * 255;
-    d[i] = d[i+1] = d[i+2] = clamp(v);
-  }
-  ctx.putImageData(id, 0, 0);
-}
-
-function applyColour(canvas) {
-  const ctx = canvas.getContext("2d");
-  const id = ctx.getImageData(0, 0, canvas.width, canvas.height);
-  const d = id.data;
-  let rMn=255,rMx=0,gMn=255,gMx=0,bMn=255,bMx=0;
-  for (let i = 0; i < d.length; i += 4) {
-    if(d[i]<rMn)rMn=d[i]; if(d[i]>rMx)rMx=d[i];
-    if(d[i+1]<gMn)gMn=d[i+1]; if(d[i+1]>gMx)gMx=d[i+1];
-    if(d[i+2]<bMn)bMn=d[i+2]; if(d[i+2]>bMx)bMx=d[i+2];
-  }
-  const rR=rMx-rMn||1, gR=gMx-gMn||1, bR=bMx-bMn||1;
-  for (let i = 0; i < d.length; i += 4) {
-    d[i]  =clamp(((d[i]  -rMn)/rR)*265);
-    d[i+1]=clamp(((d[i+1]-gMn)/gR)*265);
-    d[i+2]=clamp(((d[i+2]-bMn)/bR)*265);
-  }
-  ctx.putImageData(id, 0, 0);
-}
-
-// ── Main smart scan pipeline ──────────────────────────────────
-// 1. Detect document boundary via edge detection
-// 2. Crop & perspective-correct to just the document
-// 3. Apply chosen colour mode
-function smartScan(rawCanvas, mode) {
-  const w = rawCanvas.width, h = rawCanvas.height;
-  const ctx = rawCanvas.getContext("2d");
-  const d = ctx.getImageData(0, 0, w, h).data;
-
-  // Greyscale for edge detection
-  const grey = new Float32Array(w * h);
-  for (let i = 0; i < w * h; i++) {
-    const p = i * 4;
-    grey[i] = 0.299*d[p] + 0.587*d[p+1] + 0.114*d[p+2];
-  }
-
-  // Blur slightly before edge detection to reduce noise
-  const blurred = boxBlur(grey, w, h, 2);
-  const edges = edgeDetect(blurred, w, h);
-  const corners = findDocumentCorners(edges, w, h);
-
-  // Check if detected crop is meaningfully different from the full image
-  // (if corners are too close to the image edge, skip perspective warp)
-  const marginThresh = Math.min(w, h) * 0.06;
-  const isMeaningfulCrop =
-    corners.topLeft.x > marginThresh ||
-    corners.topLeft.y > marginThresh ||
-    corners.bottomRight.x < w - marginThresh ||
-    corners.bottomRight.y < h - marginThresh;
-
-  let result;
-  if (isMeaningfulCrop) {
-    const warped = perspectiveTransform(rawCanvas, corners);
-    result = warped ?? (() => {
-      const c = document.createElement("canvas");
-      c.width = w; c.height = h;
-      c.getContext("2d").drawImage(rawCanvas, 0, 0);
-      return c;
-    })();
-  } else {
-    result = document.createElement("canvas");
-    result.width = w; result.height = h;
-    result.getContext("2d").drawImage(rawCanvas, 0, 0);
-  }
-
-  // Apply colour mode
-  if (mode === "bw")         applyBW(result);
-  else if (mode === "grey")  applyGrey(result);
-  else if (mode === "colour") applyColour(result);
-
-  return result;
-}
-
-// ── Precise bilinear perspective warp ──────────────────────────
-// Given 4 source corners (tl, tr, br, bl) on rawCanvas,
-// produce a rectangularly-corrected output canvas.
-function perspectiveWarp(srcCanvas, tl, tr, br, bl) {
-  const outW = Math.round(Math.max(
-    Math.hypot(tr.x - tl.x, tr.y - tl.y),
-    Math.hypot(br.x - bl.x, br.y - bl.y)
-  ));
-  const outH = Math.round(Math.max(
-    Math.hypot(bl.x - tl.x, bl.y - tl.y),
-    Math.hypot(br.x - tr.x, br.y - tr.y)
-  ));
-  if (outW < 60 || outH < 60) return null;
-
-  const dst = document.createElement("canvas");
-  dst.width = outW; dst.height = outH;
-  const dctx = dst.getContext("2d");
-  const sctx = srcCanvas.getContext("2d");
-  const sd = sctx.getImageData(0, 0, srcCanvas.width, srcCanvas.height).data;
-  const id = dctx.createImageData(outW, outH);
-  const od = id.data;
-  const sw = srcCanvas.width;
-
-  for (let y = 0; y < outH; y++) {
-    const fy = y / (outH - 1);
-    for (let x = 0; x < outW; x++) {
-      const fx = x / (outW - 1);
-      // Bilinear interpolation of the 4 corners
-      const sx = (1-fx)*(1-fy)*tl.x + fx*(1-fy)*tr.x + fx*fy*br.x + (1-fx)*fy*bl.x;
-      const sy = (1-fx)*(1-fy)*tl.y + fx*(1-fy)*tr.y + fx*fy*br.y + (1-fx)*fy*bl.y;
-      const ix = Math.min(Math.max(Math.round(sx), 0), srcCanvas.width  - 1);
-      const iy = Math.min(Math.max(Math.round(sy), 0), srcCanvas.height - 1);
-      const si = (iy * sw + ix) * 4;
-      const di = (y  * outW + x) * 4;
-      od[di] = sd[si]; od[di+1] = sd[si+1]; od[di+2] = sd[si+2]; od[di+3] = 255;
-    }
-  }
-  dctx.putImageData(id, 0, 0);
-  return dst;
-}
-
-// ── AI enhancement — Claude finds exact document corners ───────
-async function aiEnhance(rawCanvas, mode) {
-  // Always have a local fallback ready
-  const fallback = smartScan(rawCanvas, mode);
-
-  try {
-    // Downscale for API (keeps cost low, still enough detail)
-    const API_MAX = 1120;
-    const scaleW = rawCanvas.width, scaleH = rawCanvas.height;
-    const scale  = Math.min(API_MAX / scaleW, API_MAX / scaleH, 1);
-    const apiW   = Math.round(scaleW * scale);
-    const apiH   = Math.round(scaleH * scale);
-    const small  = document.createElement("canvas");
-    small.width = apiW; small.height = apiH;
-    small.getContext("2d").drawImage(rawCanvas, 0, 0, apiW, apiH);
-    const base64 = small.toDataURL("image/jpeg", 0.88).split(",")[1];
-
-    const response = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: "claude-sonnet-4-20250514",
-        max_tokens: 600,
-        system: `You are a document scanning AI like CamScanner. Your job is to find the exact corners of the physical document (notebook/paper) in the image and return them as pixel coordinates relative to the image dimensions provided.
-
-Return ONLY valid JSON, no markdown, no explanation:
-{
-  "imageW": <the width you received>,
-  "imageH": <the height you received>,
-  "corners": {
-    "tl": {"x": <top-left x>,  "y": <top-left y>},
-    "tr": {"x": <top-right x>, "y": <top-right y>},
-    "br": {"x": <bottom-right x>, "y": <bottom-right y>},
-    "bl": {"x": <bottom-left x>,  "y": <bottom-left y>}
+const styles = {
+  page: {
+    minHeight: "100vh",
+    backgroundColor: "var(--off-white, #f7f7f5)",
+    color: "var(--ink, #1a1a18)",
+    fontFamily: "'Geist', sans-serif",
+    padding: "0 0 60px 0",
   },
-  "brightness": <70-155, 100=neutral, increase for dark images>,
-  "contrast":   <80-190, 100=neutral, increase for flat images>,
-  "mode": <"bw" for text/diagrams, "grey" for mixed, "colour" for photos>
-}
+  header: {
+    padding: "32px 40px 24px",
+    borderBottom: "1px solid rgba(26,26,24,0.1)",
+    marginBottom: "40px",
+  },
+  title: {
+    fontFamily: "'Instrument Serif', serif",
+    fontSize: "2rem",
+    fontWeight: 400,
+    margin: 0,
+    color: "var(--ink, #1a1a18)",
+  },
+  subtitle: {
+    fontSize: "0.875rem",
+    color: "rgba(26,26,24,0.5)",
+    marginTop: "6px",
+  },
+  container: {
+    maxWidth: "820px",
+    margin: "0 auto",
+    padding: "0 40px",
+  },
+  uploadZone: {
+    border: "2px dashed rgba(26,26,24,0.2)",
+    borderRadius: "16px",
+    padding: "60px 40px",
+    textAlign: "center",
+    cursor: "pointer",
+    transition: "all 0.2s ease",
+    backgroundColor: "rgba(26,26,24,0.02)",
+    position: "relative",
+    overflow: "hidden",
+  },
+  uploadZoneHover: {
+    border: "2px dashed rgba(26,26,24,0.5)",
+    backgroundColor: "rgba(26,26,24,0.05)",
+  },
+  uploadIcon: {
+    width: "48px",
+    height: "48px",
+    margin: "0 auto 16px",
+    opacity: 0.3,
+  },
+  uploadText: {
+    fontSize: "1rem",
+    fontWeight: 500,
+    marginBottom: "8px",
+  },
+  uploadSubtext: {
+    fontSize: "0.8rem",
+    color: "rgba(26,26,24,0.45)",
+  },
+  orDivider: {
+    display: "flex",
+    alignItems: "center",
+    gap: "16px",
+    margin: "24px 0",
+    color: "rgba(26,26,24,0.3)",
+    fontSize: "0.8rem",
+  },
+  dividerLine: {
+    flex: 1,
+    height: "1px",
+    backgroundColor: "rgba(26,26,24,0.1)",
+  },
+  cameraBtn: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: "8px",
+    width: "100%",
+    padding: "14px",
+    borderRadius: "12px",
+    border: "1.5px solid rgba(26,26,24,0.15)",
+    backgroundColor: "transparent",
+    cursor: "pointer",
+    fontSize: "0.875rem",
+    fontFamily: "'Geist', sans-serif",
+    color: "var(--ink, #1a1a18)",
+    fontWeight: 500,
+    transition: "all 0.15s ease",
+  },
+  previewCard: {
+    borderRadius: "16px",
+    overflow: "hidden",
+    border: "1px solid rgba(26,26,24,0.08)",
+    backgroundColor: "#fff",
+  },
+  previewImg: {
+    width: "100%",
+    display: "block",
+    maxHeight: "340px",
+    objectFit: "contain",
+    backgroundColor: "#fafafa",
+  },
+  canvasWrapper: {
+    position: "relative",
+    width: "100%",
+  },
+  actionBar: {
+    display: "flex",
+    gap: "12px",
+    marginTop: "28px",
+    flexWrap: "wrap",
+  },
+  btnPrimary: {
+    display: "flex",
+    alignItems: "center",
+    gap: "8px",
+    padding: "13px 24px",
+    borderRadius: "10px",
+    border: "none",
+    backgroundColor: "var(--ink, #1a1a18)",
+    color: "#f7f7f5",
+    fontFamily: "'Geist', sans-serif",
+    fontSize: "0.875rem",
+    fontWeight: 500,
+    cursor: "pointer",
+    transition: "opacity 0.15s ease",
+  },
+  btnSecondary: {
+    display: "flex",
+    alignItems: "center",
+    gap: "8px",
+    padding: "13px 24px",
+    borderRadius: "10px",
+    border: "1.5px solid rgba(26,26,24,0.15)",
+    backgroundColor: "transparent",
+    color: "var(--ink, #1a1a18)",
+    fontFamily: "'Geist', sans-serif",
+    fontSize: "0.875rem",
+    fontWeight: 500,
+    cursor: "pointer",
+    transition: "all 0.15s ease",
+  },
+  btnDanger: {
+    display: "flex",
+    alignItems: "center",
+    gap: "8px",
+    padding: "13px 24px",
+    borderRadius: "10px",
+    border: "1.5px solid rgba(220,50,50,0.25)",
+    backgroundColor: "transparent",
+    color: "#dc3232",
+    fontFamily: "'Geist', sans-serif",
+    fontSize: "0.875rem",
+    fontWeight: 500,
+    cursor: "pointer",
+    transition: "all 0.15s ease",
+  },
+  statusBar: {
+    display: "flex",
+    alignItems: "center",
+    gap: "10px",
+    padding: "14px 18px",
+    borderRadius: "12px",
+    marginTop: "20px",
+    fontSize: "0.85rem",
+  },
+  statusProcessing: {
+    backgroundColor: "rgba(245, 166, 35, 0.08)",
+    border: "1px solid rgba(245, 166, 35, 0.2)",
+    color: "#a06c00",
+  },
+  statusSuccess: {
+    backgroundColor: "rgba(34, 160, 80, 0.07)",
+    border: "1px solid rgba(34, 160, 80, 0.2)",
+    color: "#1a6e3a",
+  },
+  statusError: {
+    backgroundColor: "rgba(220, 50, 50, 0.07)",
+    border: "1px solid rgba(220, 50, 50, 0.2)",
+    color: "#b02020",
+  },
+  spinner: {
+    width: "16px",
+    height: "16px",
+    border: "2px solid currentColor",
+    borderTopColor: "transparent",
+    borderRadius: "50%",
+    animation: "spin 0.7s linear infinite",
+    flexShrink: 0,
+  },
+  cornersInfo: {
+    marginTop: "20px",
+    padding: "18px",
+    borderRadius: "12px",
+    backgroundColor: "rgba(26,26,24,0.03)",
+    border: "1px solid rgba(26,26,24,0.07)",
+  },
+  cornersTitle: {
+    fontSize: "0.75rem",
+    fontWeight: 600,
+    letterSpacing: "0.06em",
+    textTransform: "uppercase",
+    color: "rgba(26,26,24,0.4)",
+    marginBottom: "12px",
+  },
+  cornersGrid: {
+    display: "grid",
+    gridTemplateColumns: "1fr 1fr",
+    gap: "8px",
+  },
+  cornerItem: {
+    fontSize: "0.8rem",
+    padding: "8px 12px",
+    borderRadius: "8px",
+    backgroundColor: "#fff",
+    border: "1px solid rgba(26,26,24,0.08)",
+    fontFamily: "monospace",
+  },
+  extractedText: {
+    marginTop: "20px",
+    padding: "20px",
+    borderRadius: "12px",
+    backgroundColor: "#fff",
+    border: "1px solid rgba(26,26,24,0.08)",
+    fontSize: "0.875rem",
+    lineHeight: 1.7,
+    whiteSpace: "pre-wrap",
+    maxHeight: "300px",
+    overflowY: "auto",
+    color: "var(--ink, #1a1a18)",
+  },
+  tabRow: {
+    display: "flex",
+    gap: "4px",
+    marginTop: "28px",
+    borderBottom: "1px solid rgba(26,26,24,0.1)",
+    paddingBottom: "0",
+  },
+  tab: {
+    padding: "10px 18px",
+    fontSize: "0.85rem",
+    fontFamily: "'Geist', sans-serif",
+    fontWeight: 500,
+    cursor: "pointer",
+    border: "none",
+    backgroundColor: "transparent",
+    color: "rgba(26,26,24,0.4)",
+    borderBottom: "2px solid transparent",
+    marginBottom: "-1px",
+    transition: "all 0.15s ease",
+  },
+  tabActive: {
+    color: "var(--ink, #1a1a18)",
+    borderBottom: "2px solid var(--ink, #1a1a18)",
+  },
+  emptyState: {
+    textAlign: "center",
+    padding: "60px 20px",
+    color: "rgba(26,26,24,0.3)",
+    fontSize: "0.875rem",
+  },
+  cameraModal: {
+    position: "fixed",
+    inset: 0,
+    backgroundColor: "rgba(0,0,0,0.85)",
+    zIndex: 1000,
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: "20px",
+  },
+  cameraVideo: {
+    width: "min(90vw, 600px)",
+    borderRadius: "16px",
+    backgroundColor: "#000",
+  },
+  cameraBtnRow: {
+    display: "flex",
+    gap: "16px",
+  },
+  snapBtn: {
+    padding: "14px 32px",
+    borderRadius: "50px",
+    border: "none",
+    backgroundColor: "#fff",
+    color: "#1a1a18",
+    fontFamily: "'Geist', sans-serif",
+    fontWeight: 600,
+    fontSize: "0.9rem",
+    cursor: "pointer",
+  },
+  closeCamBtn: {
+    padding: "14px 24px",
+    borderRadius: "50px",
+    border: "1.5px solid rgba(255,255,255,0.3)",
+    backgroundColor: "transparent",
+    color: "#fff",
+    fontFamily: "'Geist', sans-serif",
+    fontSize: "0.9rem",
+    cursor: "pointer",
+  },
+};
 
-Rules for corners:
-- Find the outermost edges of the physical paper/notebook page, NOT the content
-- If the image shows a notebook on a background (desk, bed, floor), the corners should be the 4 corners of the notebook page itself
-- If the image is already a clean scan with no background, corners = near the image edges (small margin ~10px)
-- Coordinates must be within [0, imageW] and [0, imageH]
-- tl = top-left, tr = top-right, br = bottom-right, bl = bottom-left, going clockwise`,
-        messages: [{
-          role: "user",
-          content: [
-            { type: "image", source: { type: "base64", media_type: "image/jpeg", data: base64 } },
-            { type: "text", text: `Image dimensions: ${apiW}x${apiH}. Find the document corners and return JSON.` }
-          ]
-        }]
-      })
-    });
+const CORNER_LABELS = ["Top-left", "Top-right", "Bottom-right", "Bottom-left"];
+const CORNER_COLORS = ["#e74c3c", "#3498db", "#2ecc71", "#f39c12"];
 
-    if (!response.ok) throw new Error(`API ${response.status}`);
-    const data = await response.json();
-    const raw  = (data.content?.[0]?.text ?? "").replace(/```json|```/g, "").trim();
-    const p    = JSON.parse(raw);
-
-    // Scale corners back up to original canvas size
-    const upX = rawCanvas.width  / (p.imageW || apiW);
-    const upY = rawCanvas.height / (p.imageH || apiH);
-    const c   = p.corners;
-    const tl  = { x: c.tl.x * upX, y: c.tl.y * upY };
-    const tr  = { x: c.tr.x * upX, y: c.tr.y * upY };
-    const br  = { x: c.br.x * upX, y: c.br.y * upY };
-    const bl  = { x: c.bl.x * upX, y: c.bl.y * upY };
-
-    // Apply brightness/contrast to the raw canvas before warping
-    const adjusted = document.createElement("canvas");
-    adjusted.width = rawCanvas.width; adjusted.height = rawCanvas.height;
-    const actx = adjusted.getContext("2d");
-    actx.filter = `brightness(${p.brightness ?? 100}%) contrast(${p.contrast ?? 100}%)`;
-    actx.drawImage(rawCanvas, 0, 0);
-    actx.filter = "none";
-
-    // Warp to rectangle using the AI-identified corners
-    const warped = perspectiveWarp(adjusted, tl, tr, br, bl);
-    if (!warped) return fallback;
-
-    // Apply colour mode to the warped result
-    const effectiveMode = p.mode ?? mode;
-    if (effectiveMode === "bw")         applyBW(warped);
-    else if (effectiveMode === "grey")  applyGrey(warped);
-    else if (effectiveMode === "colour") applyColour(warped);
-
-    return warped;
-
-  } catch (e) {
-    console.warn("AI corner detection failed, using local pipeline:", e.message);
-    return fallback;
-  }
-}
-
-function fileToCanvas(file) {
-  return new Promise((resolve) => {
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const img = new Image();
-      img.onload = () => {
-        const MAX = 2600;
-        let w = img.naturalWidth, h = img.naturalHeight;
-        if (w > MAX || h > MAX) { const r = Math.min(MAX/w, MAX/h); w=Math.round(w*r); h=Math.round(h*r); }
-        const c = document.createElement("canvas");
-        c.width = w; c.height = h;
-        c.getContext("2d").drawImage(img, 0, 0, w, h);
-        resolve(c);
-      };
-      img.src = e.target.result;
-    };
-    reader.readAsDataURL(file);
-  });
-}
-
-const toJpeg = (c) => c.toDataURL("image/jpeg", 0.93);
-let _uid = 0;
-const uid = () => ++_uid;
-
-// ─────────────────────────────────────────────────────────────
-//  COMPONENT
-// ─────────────────────────────────────────────────────────────
 export default function DocumentScanner() {
-  const [pages,       setPages]       = useState([]);
-  const [selectedId,  setSelectedId]  = useState(null);
-  const [editMode,    setEditMode]    = useState(null);
-  const [cameraOpen,  setCameraOpen]  = useState(false);
-  const [dragOverIdx, setDragOverIdx] = useState(null);
-  const [dragIdx,     setDragIdx]     = useState(null);
-  const [processing,  setProcessing]  = useState(false);
-  const [procLabel,   setProcLabel]   = useState("");
-  const [procStep,    setProcStep]    = useState(0);
-  const [exportOpen,  setExportOpen]  = useState(false);
-  const [toast,       setToast]       = useState(null);
-  const [scanMode,    setScanMode]    = useState("bw");
-  const [adjVals,     setAdjVals]     = useState({ brt: 100, con: 110 });
-  const [useAI,       setUseAI]       = useState(true);
+  const [image, setImage] = useState(null); // { dataUrl, width, height }
+  const [corners, setCorners] = useState(null); // [{x,y}, ...]
+  const [warpedImage, setWarpedImage] = useState(null);
+  const [extractedText, setExtractedText] = useState("");
+  const [status, setStatus] = useState(null); // { type: 'processing'|'success'|'error', msg }
+  const [activeTab, setActiveTab] = useState("corners");
+  const [dragOver, setDragOver] = useState(false);
+  const [showCamera, setShowCamera] = useState(false);
+  const [draggingCorner, setDraggingCorner] = useState(null);
 
-  const fileRef    = useRef(null);
-  const videoRef   = useRef(null);
-  const streamRef  = useRef(null);
-  const dragSrcRef = useRef(null);
-  const timerRef   = useRef(null);
+  const fileInputRef = useRef();
+  const canvasRef = useRef();
+  const overlayCanvasRef = useRef();
+  const videoRef = useRef();
+  const streamRef = useRef();
 
-  const selectedPage = pages.find((p) => p.id === selectedId) ?? null;
+  // ─── Load image ────────────────────────────────────────────────
+  const loadImage = (dataUrl) => {
+    const img = new Image();
+    img.onload = () => {
+      setImage({ dataUrl, width: img.width, height: img.height });
+      setCorners(null);
+      setWarpedImage(null);
+      setExtractedText("");
+      setStatus(null);
+    };
+    img.src = dataUrl;
+  };
 
-  function showToast(msg, type = "success") {
-    setToast({ msg, type });
-    setTimeout(() => setToast(null), 2800);
-  }
+  const handleFile = (file) => {
+    if (!file || !file.type.startsWith("image/")) return;
+    const reader = new FileReader();
+    reader.onload = (e) => loadImage(e.target.result);
+    reader.readAsDataURL(file);
+  };
 
-  function startProgress(label) {
-    setProcLabel(label); setProcessing(true); setProcStep(0);
-    let v = 0;
-    timerRef.current = setInterval(() => {
-      v += Math.random() * 10; if (v >= 88) v = 88;
-      setProcStep(Math.round(v));
-    }, 300);
-  }
+  const handleDrop = (e) => {
+    e.preventDefault();
+    setDragOver(false);
+    handleFile(e.dataTransfer.files[0]);
+  };
 
-  function finishProgress() {
-    clearInterval(timerRef.current);
-    setProcStep(100);
-    setTimeout(() => { setProcessing(false); setProcStep(0); }, 350);
-  }
-
-  // ── Add files ──────────────────────────────────────────────
-  async function handleFiles(files) {
-    if (!files?.length) return;
-    const arr = Array.from(files);
-    for (let i = 0; i < arr.length; i++) {
-      startProgress(useAI
-        ? `AI scanning page ${i+1} of ${arr.length}…`
-        : `Scanning page ${i+1} of ${arr.length}…`);
-      const raw = await fileToCanvas(arr[i]);
-      const processed = useAI ? await aiEnhance(raw, scanMode) : smartScan(raw, scanMode);
-      const pageId = uid();
-      const p = {
-        id: pageId, dataUrl: toJpeg(processed), rawCanvas: raw,
-        mode: scanMode, aiEnhanced: useAI,
-        name: arr[i].name?.replace(/\.[^.]+$/, "") || `Page ${pages.length + i + 1}`,
-      };
-      finishProgress();
-      setPages((prev) => [...prev, p]);
-      if (i === 0) setSelectedId(pageId);
-    }
-    showToast(`${arr.length} page${arr.length > 1 ? "s" : ""} scanned`);
-  }
-
-  // ── Camera ─────────────────────────────────────────────────
-  async function openCamera() {
-    setCameraOpen(true);
+  // ─── Camera ────────────────────────────────────────────────────
+  const openCamera = async () => {
+    setShowCamera(true);
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "environment", width: { ideal: 1920 }, height: { ideal: 1080 } },
+        video: { facingMode: "environment" },
       });
       streamRef.current = stream;
-      if (videoRef.current) { videoRef.current.srcObject = stream; videoRef.current.play(); }
-    } catch { showToast("Camera access denied", "error"); setCameraOpen(false); }
-  }
+      if (videoRef.current) videoRef.current.srcObject = stream;
+    } catch {
+      setShowCamera(false);
+      setStatus({ type: "error", msg: "Camera access denied or unavailable." });
+    }
+  };
 
-  function closeCamera() {
+  const snapPhoto = () => {
+    const video = videoRef.current;
+    const canvas = document.createElement("canvas");
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    canvas.getContext("2d").drawImage(video, 0, 0);
+    const dataUrl = canvas.toDataURL("image/jpeg", 0.92);
+    stopCamera();
+    loadImage(dataUrl);
+  };
+
+  const stopCamera = () => {
     streamRef.current?.getTracks().forEach((t) => t.stop());
-    streamRef.current = null; setCameraOpen(false);
-  }
+    setShowCamera(false);
+  };
 
-  async function capturePhoto() {
-    const video = videoRef.current; if (!video) return;
-    closeCamera();
-    startProgress(useAI ? "AI processing scan…" : "Processing scan…");
-    const raw = document.createElement("canvas");
-    raw.width = video.videoWidth; raw.height = video.videoHeight;
-    raw.getContext("2d").drawImage(video, 0, 0);
-    const processed = useAI ? await aiEnhance(raw, scanMode) : smartScan(raw, scanMode);
-    const pageId = uid();
-    const p = { id: pageId, dataUrl: toJpeg(processed), rawCanvas: raw, mode: scanMode, aiEnhanced: useAI, name: `Scan ${pages.length + 1}` };
-    finishProgress();
-    setPages((prev) => [...prev, p]);
-    setSelectedId(pageId);
-    showToast("Page scanned");
-  }
+  // ─── Claude Vision: detect corners ────────────────────────────
+  const detectCorners = async () => {
+    if (!image) return;
 
-  // ── Delete ─────────────────────────────────────────────────
-  function deletePage(id) {
-    setPages((prev) => {
-      const next = prev.filter((p) => p.id !== id);
-      if (selectedId === id) { setSelectedId(next[0]?.id ?? null); setEditMode(null); }
-      return next;
-    });
-    showToast("Page removed");
-  }
-
-  // ── Reprocess ──────────────────────────────────────────────
-  async function reprocess(id, mode) {
-    const page = pages.find((p) => p.id === id); if (!page) return;
-    startProgress(useAI ? "AI reprocessing…" : "Reprocessing…");
-    const processed = useAI ? await aiEnhance(page.rawCanvas, mode) : smartScan(page.rawCanvas, mode);
-    finishProgress();
-    setPages((prev) => prev.map((p) => p.id === id ? { ...p, dataUrl: toJpeg(processed), mode, aiEnhanced: useAI } : p));
-  }
-
-  // ── Drag reorder ───────────────────────────────────────────
-  function onDragStart(e, i) { dragSrcRef.current = i; setDragIdx(i); e.dataTransfer.effectAllowed = "move"; }
-  function onDragOver(e, i)  { e.preventDefault(); setDragOverIdx(i); }
-  function onDrop(e, ti) {
-    e.preventDefault();
-    const si = dragSrcRef.current;
-    if (si != null && si !== ti) {
-      setPages((prev) => { const a = [...prev]; const [m] = a.splice(si, 1); a.splice(ti, 0, m); return a; });
+    if (!API_KEY) {
+      setStatus({ type: "error", msg: "API key not found. Make sure VITE_ANTHROPIC_API_KEY is set in your .env file." });
+      return;
     }
-    setDragOverIdx(null); setDragIdx(null); dragSrcRef.current = null;
-  }
 
-  // ── Manual adjustments ─────────────────────────────────────
-  function applyAdj() {
-    if (!selectedPage) return;
-    const c = document.createElement("canvas");
-    c.width = selectedPage.rawCanvas.width; c.height = selectedPage.rawCanvas.height;
-    const ctx = c.getContext("2d");
-    ctx.filter = `brightness(${adjVals.brt}%) contrast(${adjVals.con}%)`;
-    ctx.drawImage(selectedPage.rawCanvas, 0, 0);
-    ctx.filter = "none";
-    setPages((prev) => prev.map((p) => p.id === selectedId ? { ...p, dataUrl: toJpeg(c) } : p));
-    showToast("Adjustments applied"); setEditMode(null);
-  }
+    setStatus({ type: "processing", msg: "Detecting document corners with Claude Vision…" });
+    setCorners(null);
+    setWarpedImage(null);
+    setExtractedText("");
 
-  // ── Export PDF ─────────────────────────────────────────────
-  async function exportPDF() {
-    if (!pages.length) return;
-    setExportOpen(false);
-    startProgress("Building PDF…");
-    await new Promise((res, rej) => {
-      if (window.jspdf) return res();
-      const s = document.createElement("script");
-      s.src = "https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js";
-      s.onload = res; s.onerror = rej; document.head.appendChild(s);
-    });
-    const { jsPDF } = window.jspdf;
-    let pdf;
-    for (let i = 0; i < pages.length; i++) {
-      setProcLabel(`Adding page ${i+1} of ${pages.length}…`);
-      const img = new Image();
-      await new Promise((res) => { img.onload = res; img.src = pages[i].dataUrl; });
-      const pw = img.naturalWidth, ph = img.naturalHeight;
-      const orient = pw > ph ? "landscape" : "portrait";
-      if (i === 0) pdf = new jsPDF({ orientation: orient, unit: "px", format: [pw, ph] });
-      else pdf.addPage([pw, ph], orient);
-      pdf.addImage(pages[i].dataUrl, "JPEG", 0, 0, pw, ph);
+    try {
+      const base64 = image.dataUrl.split(",")[1];
+      const mediaType = image.dataUrl.split(";")[0].split(":")[1];
+
+      const response = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": API_KEY,
+          "anthropic-version": "2023-06-01",
+          "anthropic-dangerous-direct-browser-access": "true",
+        },
+        body: JSON.stringify({
+          model: "claude-sonnet-4-20250514",
+          max_tokens: 1000,
+          messages: [
+            {
+              role: "user",
+              content: [
+                {
+                  type: "image",
+                  source: { type: "base64", media_type: mediaType, data: base64 },
+                },
+                {
+                  type: "text",
+                  text: `Detect the four corners of the document/paper visible in this image.
+Return ONLY a JSON object with this exact format, no explanation:
+{
+  "corners": [
+    {"x": <0-1 normalized>, "y": <0-1 normalized>, "label": "top-left"},
+    {"x": <0-1 normalized>, "y": <0-1 normalized>, "label": "top-right"},
+    {"x": <0-1 normalized>, "y": <0-1 normalized>, "label": "bottom-right"},
+    {"x": <0-1 normalized>, "y": <0-1 normalized>, "label": "bottom-left"}
+  ]
+}
+x and y are normalized coordinates (0 to 1) relative to image width and height.
+Order: top-left, top-right, bottom-right, bottom-left.`,
+                },
+              ],
+            },
+          ],
+        }),
+      });
+
+      const data = await response.json();
+      if (data.error) throw new Error(data.error.message);
+
+      const raw = data.content.map((b) => b.text || "").join("");
+      const clean = raw.replace(/```json|```/g, "").trim();
+      const parsed = JSON.parse(clean);
+      const pts = parsed.corners.map((c) => ({
+        x: Math.round(c.x * image.width),
+        y: Math.round(c.y * image.height),
+      }));
+
+      setCorners(pts);
+      setStatus({ type: "success", msg: "Corners detected! Drag them to adjust, then warp." });
+      setActiveTab("corners");
+    } catch (err) {
+      setStatus({ type: "error", msg: `Detection failed: ${err.message}` });
     }
-    pdf.save("scanned-document.pdf");
-    finishProgress(); showToast("PDF saved!");
-  }
+  };
 
-  // ── Export ZIP ─────────────────────────────────────────────
-  async function exportZip() {
-    if (!pages.length) return;
-    setExportOpen(false);
-    startProgress("Zipping images…");
-    await new Promise((res, rej) => {
-      if (window.JSZip) return res();
-      const s = document.createElement("script");
-      s.src = "https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js";
-      s.onload = res; s.onerror = rej; document.head.appendChild(s);
+  // ─── Claude Vision: extract text ──────────────────────────────
+  const extractText = async () => {
+    const src = warpedImage || image?.dataUrl;
+    if (!src) return;
+
+    if (!API_KEY) {
+      setStatus({ type: "error", msg: "API key not found. Make sure VITE_ANTHROPIC_API_KEY is set in your .env file." });
+      return;
+    }
+
+    setStatus({ type: "processing", msg: "Extracting text with Claude Vision…" });
+    setActiveTab("text");
+
+    try {
+      const base64 = src.split(",")[1];
+      const mediaType = src.split(";")[0].split(":")[1];
+
+      const response = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": API_KEY,
+          "anthropic-version": "2023-06-01",
+          "anthropic-dangerous-direct-browser-access": "true",
+        },
+        body: JSON.stringify({
+          model: "claude-sonnet-4-20250514",
+          max_tokens: 4000,
+          messages: [
+            {
+              role: "user",
+              content: [
+                {
+                  type: "image",
+                  source: { type: "base64", media_type: mediaType, data: base64 },
+                },
+                {
+                  type: "text",
+                  text: "Extract all the text from this document image. Preserve the original formatting and structure as much as possible. Return only the extracted text, nothing else.",
+                },
+              ],
+            },
+          ],
+        }),
+      });
+
+      const data = await response.json();
+      if (data.error) throw new Error(data.error.message);
+      const text = data.content.map((b) => b.text || "").join("").trim();
+      setExtractedText(text);
+      setStatus({ type: "success", msg: "Text extracted successfully." });
+    } catch (err) {
+      setStatus({ type: "error", msg: `Text extraction failed: ${err.message}` });
+    }
+  };
+
+  // ─── Perspective warp (homography, pure canvas) ───────────────
+  const warpDocument = useCallback(() => {
+    if (!image || !corners || corners.length !== 4) return;
+
+    const img = new Image();
+    img.onload = () => {
+      const outW = 794;  // A4 width at 96dpi
+      const outH = 1123; // A4 height at 96dpi
+      const canvas = canvasRef.current;
+      canvas.width = outW;
+      canvas.height = outH;
+      const ctx = canvas.getContext("2d");
+
+      const dst = [
+        { x: 0, y: 0 },
+        { x: outW, y: 0 },
+        { x: outW, y: outH },
+        { x: 0, y: outH },
+      ];
+
+      const H = computeHomography(corners, dst);
+      if (!H) {
+        setStatus({ type: "error", msg: "Could not compute warp. Adjust corners and retry." });
+        return;
+      }
+
+      const Hinv = invertMatrix3x3(H);
+      const imgData = ctx.createImageData(outW, outH);
+      const offscreen = document.createElement("canvas");
+      offscreen.width = img.width;
+      offscreen.height = img.height;
+      const offCtx = offscreen.getContext("2d");
+      offCtx.drawImage(img, 0, 0);
+      const srcData = offCtx.getImageData(0, 0, img.width, img.height);
+
+      if (!Hinv) {
+        ctx.drawImage(img, 0, 0, outW, outH);
+      } else {
+        for (let dy = 0; dy < outH; dy++) {
+          for (let dx = 0; dx < outW; dx++) {
+            const [sx, sy] = applyHomography(Hinv, dx, dy);
+            const six = Math.round(sx);
+            const siy = Math.round(sy);
+            if (six >= 0 && six < img.width && siy >= 0 && siy < img.height) {
+              const si = (siy * img.width + six) * 4;
+              const di = (dy * outW + dx) * 4;
+              imgData.data[di]     = srcData.data[si];
+              imgData.data[di + 1] = srcData.data[si + 1];
+              imgData.data[di + 2] = srcData.data[si + 2];
+              imgData.data[di + 3] = srcData.data[si + 3];
+            }
+          }
+        }
+        ctx.putImageData(imgData, 0, 0);
+      }
+
+      const dataUrl = canvas.toDataURL("image/jpeg", 0.92);
+      setWarpedImage(dataUrl);
+      setStatus({ type: "success", msg: "Document warped! Ready for text extraction." });
+      setActiveTab("warped");
+    };
+    img.src = image.dataUrl;
+  }, [image, corners]);
+
+  // ─── Corner overlay drawing ────────────────────────────────────
+  const drawOverlay = useCallback(() => {
+    const canvas = overlayCanvasRef.current;
+    if (!canvas || !corners || !image) return;
+    const ctx = canvas.getContext("2d");
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    const scaleX = canvas.width / image.width;
+    const scaleY = canvas.height / image.height;
+    const pts = corners.map((c) => ({ x: c.x * scaleX, y: c.y * scaleY }));
+
+    // Polygon
+    ctx.beginPath();
+    ctx.moveTo(pts[0].x, pts[0].y);
+    pts.forEach((p) => ctx.lineTo(p.x, p.y));
+    ctx.closePath();
+    ctx.strokeStyle = "rgba(26,26,24,0.6)";
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.fillStyle = "rgba(26,26,24,0.06)";
+    ctx.fill();
+
+    // Handles
+    pts.forEach((p, i) => {
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, 9, 0, Math.PI * 2);
+      ctx.fillStyle = CORNER_COLORS[i];
+      ctx.fill();
+      ctx.strokeStyle = "#fff";
+      ctx.lineWidth = 2;
+      ctx.stroke();
     });
-    const zip = new window.JSZip();
-    pages.forEach((p, i) => zip.file(`page-${String(i+1).padStart(3,"0")}.jpg`, p.dataUrl.split(",")[1], { base64: true }));
-    const blob = await zip.generateAsync({ type: "blob" });
-    const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "scanned-pages.zip"; a.click();
-    finishProgress(); showToast("Images downloaded!");
-  }
+  }, [corners, image]);
 
-  useEffect(() => {
-    const fn = (e) => { if (!e.target.closest(`.${styles.exportWrap}`)) setExportOpen(false); };
-    document.addEventListener("mousedown", fn);
-    return () => document.removeEventListener("mousedown", fn);
-  }, []);
+  // ─── Draggable corner handlers ─────────────────────────────────
+  const getCanvasPos = (e, canvas) => {
+    const rect = canvas.getBoundingClientRect();
+    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+    return {
+      x: ((clientX - rect.left) / rect.width) * image.width,
+      y: ((clientY - rect.top) / rect.height) * image.height,
+    };
+  };
 
-  // ── Render ─────────────────────────────────────────────────
+  const onOverlayMouseDown = (e) => {
+    if (!corners) return;
+    const canvas = overlayCanvasRef.current;
+    const pos = getCanvasPos(e, canvas);
+    const scaleX = canvas.clientWidth / image.width;
+    const scaleY = canvas.clientHeight / image.height;
+    const idx = corners.findIndex((c) => {
+      const dx = (c.x - pos.x) * scaleX;
+      const dy = (c.y - pos.y) * scaleY;
+      return Math.sqrt(dx * dx + dy * dy) < 18;
+    });
+    if (idx !== -1) setDraggingCorner(idx);
+  };
+
+  const onOverlayMouseMove = (e) => {
+    if (draggingCorner === null) return;
+    const canvas = overlayCanvasRef.current;
+    const pos = getCanvasPos(e, canvas);
+    const newCorners = corners.map((c, i) =>
+      i === draggingCorner
+        ? {
+            x: Math.max(0, Math.min(image.width, pos.x)),
+            y: Math.max(0, Math.min(image.height, pos.y)),
+          }
+        : c
+    );
+    setCorners(newCorners);
+    drawOverlay();
+  };
+
+  const onOverlayMouseUp = () => setDraggingCorner(null);
+
+  // ─── Reset ─────────────────────────────────────────────────────
+  const reset = () => {
+    setImage(null);
+    setCorners(null);
+    setWarpedImage(null);
+    setExtractedText("");
+    setStatus(null);
+  };
+
+  const copyText = () => {
+    navigator.clipboard.writeText(extractedText);
+    setStatus({ type: "success", msg: "Text copied to clipboard!" });
+  };
+
+  const hasImage = !!image;
+  const hasCorners = !!corners;
+  const hasWarped = !!warpedImage;
+  const hasText = !!extractedText;
+
+  // ─── Render ────────────────────────────────────────────────────
   return (
-    <div className={styles.homeContainer}>
-      <SideBar />
-      <div className={styles.mainWrapper}>
-        <Header />
-        <main className={styles.mainContent}>
-          <div className={styles.page}>
+    <div style={styles.page}>
+      <style>{`
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .upload-zone:hover { border-color: rgba(26,26,24,0.4) !important; background: rgba(26,26,24,0.04) !important; }
+        .cam-btn:hover { background: rgba(26,26,24,0.04) !important; }
+        .btn-primary:hover { opacity: 0.82; }
+        .btn-secondary:hover { background: rgba(26,26,24,0.04) !important; }
+        .btn-danger:hover { background: rgba(220,50,50,0.05) !important; }
+        .overlay-canvas { cursor: crosshair; position: absolute; inset: 0; width: 100%; height: 100%; }
+      `}</style>
 
-            {/* ── Page Header ── */}
-            <div className={styles.pageHeader}>
-              <div className={styles.pageEyebrow}>Student Utilities</div>
-              <h1 className={styles.pageTitle}>Document <em>Scanner</em></h1>
+      {/* Header */}
+      <div style={styles.header}>
+        <h1 style={styles.title}>Document Scanner</h1>
+        <p style={styles.subtitle}>
+          Capture, detect corners, warp perspective, and extract text from documents
+        </p>
+      </div>
+
+      <div style={styles.container}>
+
+        {/* ── Upload zone ── */}
+        {!hasImage && (
+          <>
+            <div
+              className="upload-zone"
+              style={{ ...styles.uploadZone, ...(dragOver ? styles.uploadZoneHover : {}) }}
+              onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+              onDragLeave={() => setDragOver(false)}
+              onDrop={handleDrop}
+              onClick={() => fileInputRef.current.click()}
+            >
+              <svg style={styles.uploadIcon} viewBox="0 0 48 48" fill="none">
+                <rect x="6" y="8" width="36" height="32" rx="4" stroke="currentColor" strokeWidth="2.5" />
+                <path d="M16 20h16M16 28h10" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
+                <path d="M24 4v10M20 8l4-4 4 4" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+              <p style={styles.uploadText}>Drop an image here or click to upload</p>
+              <p style={styles.uploadSubtext}>JPG, PNG, WEBP supported</p>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                style={{ display: "none" }}
+                onChange={(e) => handleFile(e.target.files[0])}
+              />
             </div>
 
-            {/* ── Controls bar (below title, not in header) ── */}
-            <div className={styles.controlsBar}>
-              <div className={styles.controlsLeft}>
-                {/* AI toggle */}
+            <div style={styles.orDivider}>
+              <div style={styles.dividerLine} />
+              <span>or</span>
+              <div style={styles.dividerLine} />
+            </div>
+
+            <button className="cam-btn" style={styles.cameraBtn} onClick={openCamera}>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+                <path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                <circle cx="12" cy="13" r="4" stroke="currentColor" strokeWidth="1.8" />
+              </svg>
+              Use Camera
+            </button>
+          </>
+        )}
+
+        {/* ── Status bar ── */}
+        {status && (
+          <div
+            style={{
+              ...styles.statusBar,
+              ...(status.type === "processing" ? styles.statusProcessing : {}),
+              ...(status.type === "success"    ? styles.statusSuccess    : {}),
+              ...(status.type === "error"      ? styles.statusError      : {}),
+              ...(hasImage ? { marginTop: "20px" } : {}),
+            }}
+          >
+            {status.type === "processing" && <div style={styles.spinner} />}
+            {status.type === "success" && (
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                <path d="M20 6L9 17l-5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            )}
+            {status.type === "error" && (
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2" />
+                <path d="M12 8v4M12 16h.01" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+              </svg>
+            )}
+            <span>{status.msg}</span>
+          </div>
+        )}
+
+        {/* ── Workspace ── */}
+        {hasImage && (
+          <>
+            {/* Tab bar */}
+            <div style={styles.tabRow}>
+              <button
+                style={{ ...styles.tab, ...(activeTab === "original" ? styles.tabActive : {}) }}
+                onClick={() => setActiveTab("original")}
+              >
+                Original
+              </button>
+              {hasCorners && (
                 <button
-                  className={`${styles.aiToggle} ${useAI ? styles.aiToggleOn : ""}`}
-                  onClick={() => setUseAI((v) => !v)}
+                  style={{ ...styles.tab, ...(activeTab === "corners" ? styles.tabActive : {}) }}
+                  onClick={() => { setActiveTab("corners"); setTimeout(drawOverlay, 50); }}
                 >
-                  <span className={styles.aiDot} />
-                  {useAI ? "AI Enhance: On" : "AI Enhance: Off"}
+                  Corners
                 </button>
-
-                {/* Scan mode */}
-                <div className={styles.modeToggle}>
-                  {[
-                    { k: "bw",     icon: "fa-solid fa-file-lines",        label: "B&W" },
-                    { k: "grey",   icon: "fa-solid fa-circle-half-stroke", label: "Grey" },
-                    { k: "colour", icon: "fa-solid fa-palette",            label: "Colour" },
-                  ].map((m) => (
-                    <button key={m.k}
-                      className={`${styles.modeBtn} ${scanMode === m.k ? styles.modeBtnOn : ""}`}
-                      onClick={() => setScanMode(m.k)}>
-                      <i className={m.icon}></i><span>{m.label}</span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Export — fixed to bottom right of page, not inline */}
-              {pages.length > 0 && (
-                <div className={styles.exportWrap}>
-                  <button className={`${styles.btn} ${styles.btnInk}`} onClick={() => setExportOpen((v) => !v)}>
-                    <i className="fa-solid fa-file-export"></i> Export
-                    <i className="fa-solid fa-chevron-down" style={{ fontSize: 9, marginLeft: 2 }}></i>
-                  </button>
-                </div>
+              )}
+              {hasWarped && (
+                <button
+                  style={{ ...styles.tab, ...(activeTab === "warped" ? styles.tabActive : {}) }}
+                  onClick={() => setActiveTab("warped")}
+                >
+                  Warped
+                </button>
+              )}
+              {hasText && (
+                <button
+                  style={{ ...styles.tab, ...(activeTab === "text" ? styles.tabActive : {}) }}
+                  onClick={() => setActiveTab("text")}
+                >
+                  Text
+                </button>
               )}
             </div>
 
-            {/* ── Main layout ── */}
-            <div className={styles.layout}>
+            {/* Original tab */}
+            {activeTab === "original" && (
+              <div style={{ ...styles.previewCard, marginTop: "16px" }}>
+                <img src={image.dataUrl} alt="Original" style={styles.previewImg} />
+              </div>
+            )}
 
-              {/* Left strip */}
-              <div className={styles.strip}>
-                <div className={styles.stripHead}>
-                  <span>Pages</span>
-                  <span className={styles.badge}>{pages.length}</span>
-                </div>
-                <div className={styles.stripScroll}>
-                  {pages.length === 0 && (
-                    <div className={styles.stripEmpty}>
-                      <i className="fa-regular fa-file-image"></i>
-                      <p>No pages yet</p>
-                    </div>
-                  )}
-                  {pages.map((p, i) => (
-                    <div key={p.id}
-                      draggable
-                      onDragStart={(e) => onDragStart(e, i)}
-                      onDragOver={(e) => onDragOver(e, i)}
-                      onDrop={(e) => onDrop(e, i)}
-                      onDragEnd={() => { setDragOverIdx(null); setDragIdx(null); }}
-                      onClick={() => { setSelectedId(p.id); setEditMode(null); }}
-                      className={[
-                        styles.thumb,
-                        selectedId === p.id ? styles.thumbOn : "",
-                        dragOverIdx === i   ? styles.thumbOver : "",
-                        dragIdx === i       ? styles.thumbGhost : "",
-                      ].join(" ")}
-                    >
-                      <span className={styles.thumbNum}>{i + 1}</span>
-                      {p.aiEnhanced && <span className={styles.thumbAiBadge}>AI</span>}
-                      <img src={p.dataUrl} alt={`Page ${i + 1}`} />
-                      <button className={styles.thumbDel}
-                        onClick={(e) => { e.stopPropagation(); deletePage(p.id); }}>
-                        <i className="fa-solid fa-xmark"></i>
-                      </button>
-                      <span className={styles.grip}><i className="fa-solid fa-grip-vertical"></i></span>
-                    </div>
-                  ))}
-                </div>
-                <div className={styles.addRow}>
-                  <button className={`${styles.btn} ${styles.btnInk}`} onClick={() => fileRef.current?.click()}>
-                    <i className="fa-solid fa-arrow-up-from-bracket"></i> Upload
-                  </button>
-                  <button className={`${styles.btn} ${styles.btnOutline}`} onClick={openCamera}>
-                    <i className="fa-solid fa-camera"></i> Camera
-                  </button>
-                  <input ref={fileRef} type="file" accept="image/*" multiple style={{ display: "none" }}
-                    onChange={(e) => handleFiles(e.target.files)} />
+            {/* Corners tab */}
+            {activeTab === "corners" && hasCorners && (
+              <div style={{ ...styles.previewCard, marginTop: "16px" }}>
+                <div style={styles.canvasWrapper}>
+                  <img
+                    src={image.dataUrl}
+                    alt="Original"
+                    style={{ ...styles.previewImg, display: "block" }}
+                  />
+                  <canvas
+                    className="overlay-canvas"
+                    width={image.width}
+                    height={image.height}
+                    onMouseDown={onOverlayMouseDown}
+                    onMouseMove={onOverlayMouseMove}
+                    onMouseUp={onOverlayMouseUp}
+                    onMouseLeave={onOverlayMouseUp}
+                    onTouchStart={onOverlayMouseDown}
+                    onTouchMove={onOverlayMouseMove}
+                    onTouchEnd={onOverlayMouseUp}
+                    ref={(el) => {
+                      overlayCanvasRef.current = el;
+                      if (el && corners) {
+                        el.width = image.width;
+                        el.height = image.height;
+                        setTimeout(drawOverlay, 0);
+                      }
+                    }}
+                  />
                 </div>
               </div>
+            )}
 
-              {/* Right viewer */}
-              <div className={styles.viewer}>
-                {!selectedPage ? (
-                  <div className={styles.dropZone}
-                    onClick={() => fileRef.current?.click()}
-                    onDragOver={(e) => e.preventDefault()}
-                    onDrop={(e) => { e.preventDefault(); handleFiles(e.dataTransfer.files); }}>
-                    <div className={styles.dropIco}><i className="fa-solid fa-file-magnifying-glass"></i></div>
-                    <h2 className={styles.dropTitle}>Drop documents here</h2>
-                    <p className={styles.dropSub}>
-                      JPG · PNG · HEIC · multiple files<br />
-                      {useAI ? "Claude AI detects & crops the document automatically" : "Smart edge detection crops the document automatically"}
-                    </p>
-                    <div className={styles.dropBtns}>
-                      <button className={`${styles.btn} ${styles.btnInk}`}
-                        onClick={(e) => { e.stopPropagation(); fileRef.current?.click(); }}>
-                        <i className="fa-solid fa-arrow-up-from-bracket"></i> Choose Files
-                      </button>
-                      <button className={`${styles.btn} ${styles.btnOutline}`}
-                        onClick={(e) => { e.stopPropagation(); openCamera(); }}>
-                        <i className="fa-solid fa-camera"></i> Use Camera
-                      </button>
-                    </div>
-                  </div>
+            {/* Warped tab */}
+            {activeTab === "warped" && hasWarped && (
+              <div style={{ ...styles.previewCard, marginTop: "16px" }}>
+                <img src={warpedImage} alt="Warped document" style={styles.previewImg} />
+              </div>
+            )}
+
+            {/* Text tab */}
+            {activeTab === "text" && (
+              <div style={{ marginTop: "16px" }}>
+                {hasText ? (
+                  <div style={styles.extractedText}>{extractedText}</div>
                 ) : (
-                  <div className={styles.editorWrap}>
-                    {/* Toolbar */}
-                    <div className={styles.toolbar}>
-                      <div className={styles.tbL}>
-                        <span className={styles.docName}>{selectedPage.name}</span>
-                        <span className={styles.docIdx}>{pages.findIndex((p) => p.id === selectedId) + 1} / {pages.length}</span>
-                        {selectedPage.aiEnhanced && <span className={styles.aiBadge}>AI</span>}
-                      </div>
-                      <div className={styles.tbR}>
-                        <div className={styles.modeMini}>
-                          {[{k:"bw",l:"B&W"},{k:"grey",l:"Grey"},{k:"colour",l:"Colour"}].map((m) => (
-                            <button key={m.k}
-                              className={`${styles.miniBtn} ${selectedPage.mode === m.k ? styles.miniBtnOn : ""}`}
-                              onClick={() => reprocess(selectedId, m.k)}>{m.l}</button>
-                          ))}
-                        </div>
-                        <button className={`${styles.toolBtn} ${editMode === "enhance" ? styles.toolBtnOn : ""}`}
-                          onClick={() => setEditMode(editMode === "enhance" ? null : "enhance")}>
-                          <i className="fa-solid fa-sliders"></i> Adjust
-                        </button>
-                        <button className={`${styles.toolBtn} ${styles.toolBtnDanger}`}
-                          onClick={() => deletePage(selectedId)}>
-                          <i className="fa-solid fa-trash"></i>
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* Adjust panel */}
-                    {editMode === "enhance" && (
-                      <div className={styles.adjPanel}>
-                        {[
-                          { k: "brt", label: "Brightness", min: 50, max: 200, suffix: "%" },
-                          { k: "con", label: "Contrast",   min: 50, max: 200, suffix: "%" },
-                        ].map((sl) => (
-                          <div className={styles.slRow} key={sl.k}>
-                            <span className={styles.slLabel}>{sl.label}</span>
-                            <input type="range" min={sl.min} max={sl.max} value={adjVals[sl.k]}
-                              onChange={(e) => setAdjVals((v) => ({ ...v, [sl.k]: Number(e.target.value) }))} />
-                            <span className={styles.slVal}>{adjVals[sl.k]}{sl.suffix}</span>
-                          </div>
-                        ))}
-                        <div className={styles.adjActions}>
-                          <button className={`${styles.btn} ${styles.btnOutline} ${styles.btnSm}`}
-                            onClick={() => { setAdjVals({ brt: 100, con: 110 }); setEditMode(null); }}>Reset</button>
-                          <button className={`${styles.btn} ${styles.btnInk} ${styles.btnSm}`} onClick={applyAdj}>Apply</button>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Image */}
-                    <div className={styles.imgWrap}>
-                      <img src={selectedPage.dataUrl} alt="Scanned page" />
-                    </div>
-
-                    {/* Nav */}
-                    <div className={styles.navBar}>
-                      <button className={`${styles.btn} ${styles.btnOutline} ${styles.btnSm}`}
-                        disabled={pages.findIndex((p) => p.id === selectedId) === 0}
-                        onClick={() => { const i = pages.findIndex((p) => p.id === selectedId); if (i > 0) { setSelectedId(pages[i-1].id); setEditMode(null); } }}>
-                        <i className="fa-solid fa-chevron-left"></i> Prev
-                      </button>
-                      <div className={styles.dots}>
-                        {pages.map((p) => (
-                          <span key={p.id}
-                            className={`${styles.dot} ${p.id === selectedId ? styles.dotOn : ""}`}
-                            onClick={() => { setSelectedId(p.id); setEditMode(null); }} />
-                        ))}
-                      </div>
-                      <button className={`${styles.btn} ${styles.btnOutline} ${styles.btnSm}`}
-                        disabled={pages.findIndex((p) => p.id === selectedId) === pages.length - 1}
-                        onClick={() => { const i = pages.findIndex((p) => p.id === selectedId); if (i < pages.length - 1) { setSelectedId(pages[i+1].id); setEditMode(null); } }}>
-                        Next <i className="fa-solid fa-chevron-right"></i>
-                      </button>
-                    </div>
+                  <div style={styles.emptyState}>
+                    No text extracted yet. Click &ldquo;Extract Text&rdquo; below.
                   </div>
                 )}
               </div>
-            </div>
-          </div>
+            )}
 
-          {/* ── Export panel — fixed bottom right, always above everything ── */}
-          {exportOpen && pages.length > 0 && (
-            <>
-              <div className={styles.exportBackdrop} onClick={() => setExportOpen(false)} />
-              <div className={styles.exportPanel}>
-                <div className={styles.exportPanelTitle}>Export Document</div>
-                <button className={styles.exportOption} onClick={exportPDF}>
-                  <div className={styles.exportOptionIcon}><i className="fa-solid fa-file-pdf"></i></div>
-                  <div className={styles.exportOptionText}>
-                    <span>Save as PDF</span>
-                    <small>{pages.length} page{pages.length > 1 ? "s" : ""} combined into one file</small>
-                  </div>
+            {/* Corner coordinate display */}
+            {hasCorners && activeTab === "corners" && (
+              <div style={styles.cornersInfo}>
+                <div style={styles.cornersTitle}>Detected Corner Coordinates</div>
+                <div style={styles.cornersGrid}>
+                  {corners.map((c, i) => (
+                    <div
+                      key={i}
+                      style={{ ...styles.cornerItem, borderLeft: `3px solid ${CORNER_COLORS[i]}` }}
+                    >
+                      <span style={{ color: CORNER_COLORS[i], fontWeight: 600 }}>
+                        {CORNER_LABELS[i]}
+                      </span>
+                      <br />
+                      x: {Math.round(c.x)}, y: {Math.round(c.y)}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Action buttons */}
+            <div style={styles.actionBar}>
+              {!hasCorners && (
+                <button
+                  className="btn-primary"
+                  style={styles.btnPrimary}
+                  onClick={detectCorners}
+                  disabled={status?.type === "processing"}
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                    <path d="M3 7V5a2 2 0 012-2h2M17 3h2a2 2 0 012 2v2M21 17v2a2 2 0 01-2 2h-2M7 21H5a2 2 0 01-2-2v-2" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                    <circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="2" />
+                  </svg>
+                  Detect Corners
                 </button>
-                <button className={styles.exportOption} onClick={exportZip}>
-                  <div className={styles.exportOptionIcon}><i className="fa-solid fa-images"></i></div>
-                  <div className={styles.exportOptionText}>
-                    <span>Save as Images</span>
-                    <small>ZIP archive of JPG files</small>
-                  </div>
+              )}
+
+              {hasCorners && !hasWarped && (
+                <button
+                  className="btn-primary"
+                  style={styles.btnPrimary}
+                  onClick={warpDocument}
+                  disabled={status?.type === "processing"}
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                    <path d="M4 4l16 0M4 20l16 0M4 4l4 16M20 4l-4 16" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                  </svg>
+                  Warp Document
                 </button>
-              </div>
-            </>
-          )}
+              )}
 
-          {/* ── Camera modal ── */}
-          {cameraOpen && (
-            <div className={styles.overlay}>
-              <div className={styles.camModal}>
-                <div className={styles.camHead}>
-                  <span>Camera — point at document</span>
-                  <button className={styles.camClose} onClick={closeCamera}><i className="fa-solid fa-xmark"></i></button>
-                </div>
-                <div className={styles.camBody}>
-                  <video ref={videoRef} className={styles.camVideo} playsInline muted />
-                  <div className={styles.camGuide} />
-                  <div className={styles.camHint}>Align document within the guide</div>
-                </div>
-                <div className={styles.camFoot}>
-                  <div className={styles.camModes}>
-                    {[{k:"bw",l:"B&W"},{k:"grey",l:"Grey"},{k:"colour",l:"Colour"}].map((m) => (
-                      <button key={m.k}
-                        className={`${styles.camModeBtn} ${scanMode === m.k ? styles.camModeBtnOn : ""}`}
-                        onClick={() => setScanMode(m.k)}>{m.l}</button>
-                    ))}
-                  </div>
-                  <button className={styles.shutter} onClick={capturePhoto}>
-                    <span className={styles.shutterInner} />
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
+              {(hasWarped || hasImage) && (
+                <button
+                  className="btn-secondary"
+                  style={styles.btnSecondary}
+                  onClick={extractText}
+                  disabled={status?.type === "processing"}
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                    <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
+                    <path d="M14 2v6h6M16 13H8M16 17H8M10 9H8" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+                  </svg>
+                  Extract Text
+                </button>
+              )}
 
-          {/* ── Processing overlay ── */}
-          {processing && (
-            <div className={styles.overlay}>
-              <div className={styles.procCard}>
-                <div className={styles.procTop}>
-                  <div className={styles.spinner} />
-                  <span className={styles.procLabel}>{procLabel}</span>
-                </div>
-                <div className={styles.progTrack}>
-                  <div className={styles.progFill} style={{ width: `${procStep}%` }} />
-                </div>
-                <span className={styles.procPct}>{procStep}%</span>
-              </div>
-            </div>
-          )}
+              {hasText && (
+                <button
+                  className="btn-secondary"
+                  style={styles.btnSecondary}
+                  onClick={copyText}
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                    <rect x="9" y="9" width="13" height="13" rx="2" stroke="currentColor" strokeWidth="1.8" />
+                    <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+                  </svg>
+                  Copy Text
+                </button>
+              )}
 
-          {/* ── Toast ── */}
-          {toast && (
-            <div className={`${styles.toast} ${toast.type === "error" ? styles.toastErr : ""}`}>
-              <i className={`fa-solid ${toast.type === "error" ? "fa-circle-xmark" : "fa-circle-check"}`}></i>
-              {toast.msg}
+              {hasWarped && (
+                <button
+                  className="btn-secondary"
+                  style={styles.btnSecondary}
+                  onClick={() => {
+                    const a = document.createElement("a");
+                    a.href = warpedImage;
+                    a.download = "scanned-document.jpg";
+                    a.click();
+                  }}
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                    <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                  Download
+                </button>
+              )}
+
+              <button
+                className="btn-danger"
+                style={styles.btnDanger}
+                onClick={reset}
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                  <path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+                Clear
+              </button>
             </div>
-          )}
-        </main>
+          </>
+        )}
+
+        {/* Hidden canvas for perspective warp output */}
+        <canvas ref={canvasRef} style={{ display: "none" }} />
       </div>
+
+      {/* ── Camera modal ── */}
+      {showCamera && (
+        <div style={styles.cameraModal}>
+          <video
+            ref={videoRef}
+            autoPlay
+            playsInline
+            style={styles.cameraVideo}
+          />
+          <div style={styles.cameraBtnRow}>
+            <button style={styles.snapBtn} onClick={snapPhoto}>
+              📸 Capture
+            </button>
+            <button style={styles.closeCamBtn} onClick={stopCamera}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
+}
+
+// ─── Homography math (no external dependencies) ─────────────────
+
+function computeHomography(src, dst) {
+  const A = [];
+  for (let i = 0; i < 4; i++) {
+    const { x: sx, y: sy } = src[i];
+    const { x: dx, y: dy } = dst[i];
+    A.push([-sx, -sy, -1,   0,   0,  0, dx * sx, dx * sy, dx]);
+    A.push([  0,   0,  0, -sx, -sy, -1, dy * sx, dy * sy, dy]);
+  }
+  const h = solveDLT(A);
+  if (!h) return null;
+  return [
+    [h[0], h[1], h[2]],
+    [h[3], h[4], h[5]],
+    [h[6], h[7], 1],
+  ];
+}
+
+function solveDLT(A) {
+  const n = 9;
+  const At = transpose(A);
+  const AtA = matMul(At, A);
+  return smallestEigenvector(AtA, n);
+}
+
+function transpose(M) {
+  return M[0].map((_, j) => M.map((row) => row[j]));
+}
+
+function matMul(A, B) {
+  const rows = A.length;
+  const cols = B[0].length;
+  return Array.from({ length: rows }, (_, i) =>
+    Array.from({ length: cols }, (_, j) =>
+      A[i].reduce((s, _, k) => s + A[i][k] * B[k][j], 0)
+    )
+  );
+}
+
+function smallestEigenvector(M, n) {
+  let v = Array(n).fill(0).map((_, i) => (i === n - 1 ? 1 : 0));
+  const shift = 1e-6;
+  const shifted = M.map((row, i) =>
+    row.map((val, j) => (i === j ? val + shift : val))
+  );
+  for (let iter = 0; iter < 200; iter++) {
+    const Mv = gaussSolve(shifted, v);
+    if (!Mv) return null;
+    const norm = Math.sqrt(Mv.reduce((s, x) => s + x * x, 0));
+    v = Mv.map((x) => x / norm);
+  }
+  return v;
+}
+
+function gaussSolve(A, b) {
+  const n = b.length;
+  const M = A.map((row, i) => [...row, b[i]]);
+  for (let col = 0; col < n; col++) {
+    let maxRow = col;
+    for (let row = col + 1; row < n; row++) {
+      if (Math.abs(M[row][col]) > Math.abs(M[maxRow][col])) maxRow = row;
+    }
+    [M[col], M[maxRow]] = [M[maxRow], M[col]];
+    if (Math.abs(M[col][col]) < 1e-12) return null;
+    for (let row = col + 1; row < n; row++) {
+      const f = M[row][col] / M[col][col];
+      for (let k = col; k <= n; k++) M[row][k] -= f * M[col][k];
+    }
+  }
+  const x = Array(n).fill(0);
+  for (let i = n - 1; i >= 0; i--) {
+    x[i] = M[i][n];
+    for (let j = i + 1; j < n; j++) x[i] -= M[i][j] * x[j];
+    x[i] /= M[i][i];
+  }
+  return x;
+}
+
+function invertMatrix3x3(m) {
+  const [a, b, c] = m[0];
+  const [d, e, f] = m[1];
+  const [g, h, k] = m[2];
+  const det =
+    a * (e * k - f * h) -
+    b * (d * k - f * g) +
+    c * (d * h - e * g);
+  if (Math.abs(det) < 1e-12) return null;
+  const inv = 1 / det;
+  return [
+    [(e * k - f * h) * inv, (c * h - b * k) * inv, (b * f - c * e) * inv],
+    [(f * g - d * k) * inv, (a * k - c * g) * inv, (c * d - a * f) * inv],
+    [(d * h - e * g) * inv, (b * g - a * h) * inv, (a * e - b * d) * inv],
+  ];
+}
+
+function applyHomography(H, x, y) {
+  const w = H[2][0] * x + H[2][1] * y + H[2][2];
+  return [
+    (H[0][0] * x + H[0][1] * y + H[0][2]) / w,
+    (H[1][0] * x + H[1][1] * y + H[1][2]) / w,
+  ];
 }
