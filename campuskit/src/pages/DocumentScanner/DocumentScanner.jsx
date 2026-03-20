@@ -1,6 +1,7 @@
 import { useState, useRef, useCallback } from "react";
 
-const API_KEY = import.meta.env.VITE_ANTHROPIC_API_KEY;
+const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
+const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`;
 
 const styles = {
   page: {
@@ -310,12 +311,34 @@ const styles = {
 const CORNER_LABELS = ["Top-left", "Top-right", "Bottom-right", "Bottom-left"];
 const CORNER_COLORS = ["#e74c3c", "#3498db", "#2ecc71", "#f39c12"];
 
+// ─── Gemini API helper ─────────────────────────────────────────
+async function callGemini(base64, mimeType, prompt) {
+  const response = await fetch(GEMINI_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      contents: [
+        {
+          parts: [
+            { inline_data: { mime_type: mimeType, data: base64 } },
+            { text: prompt },
+          ],
+        },
+      ],
+      generationConfig: { temperature: 0 },
+    }),
+  });
+  const data = await response.json();
+  if (data.error) throw new Error(data.error.message);
+  return data.candidates?.[0]?.content?.parts?.[0]?.text || "";
+}
+
 export default function DocumentScanner() {
-  const [image, setImage] = useState(null); // { dataUrl, width, height }
-  const [corners, setCorners] = useState(null); // [{x,y}, ...]
+  const [image, setImage] = useState(null);
+  const [corners, setCorners] = useState(null);
   const [warpedImage, setWarpedImage] = useState(null);
   const [extractedText, setExtractedText] = useState("");
-  const [status, setStatus] = useState(null); // { type: 'processing'|'success'|'error', msg }
+  const [status, setStatus] = useState(null);
   const [activeTab, setActiveTab] = useState("corners");
   const [dragOver, setDragOver] = useState(false);
   const [showCamera, setShowCamera] = useState(false);
@@ -384,47 +407,26 @@ export default function DocumentScanner() {
     setShowCamera(false);
   };
 
-  // ─── Claude Vision: detect corners ────────────────────────────
+  // ─── Gemini: detect corners ────────────────────────────────────
   const detectCorners = async () => {
     if (!image) return;
 
-    if (!API_KEY) {
-      setStatus({ type: "error", msg: "API key not found. Make sure VITE_ANTHROPIC_API_KEY is set in your .env file." });
+    if (!GEMINI_API_KEY) {
+      setStatus({ type: "error", msg: "API key not found. Make sure VITE_GEMINI_API_KEY is set in your .env file." });
       return;
     }
 
-    setStatus({ type: "processing", msg: "Detecting document corners with Claude Vision…" });
+    setStatus({ type: "processing", msg: "Detecting document corners with Gemini Vision…" });
     setCorners(null);
     setWarpedImage(null);
     setExtractedText("");
 
     try {
       const base64 = image.dataUrl.split(",")[1];
-      const mediaType = image.dataUrl.split(";")[0].split(":")[1];
+      const mimeType = image.dataUrl.split(";")[0].split(":")[1];
 
-      const response = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-api-key": API_KEY,
-          "anthropic-version": "2023-06-01",
-          "anthropic-dangerous-direct-browser-access": "true",
-        },
-        body: JSON.stringify({
-          model: "claude-sonnet-4-20250514",
-          max_tokens: 1000,
-          messages: [
-            {
-              role: "user",
-              content: [
-                {
-                  type: "image",
-                  source: { type: "base64", media_type: mediaType, data: base64 },
-                },
-                {
-                  type: "text",
-                  text: `Detect the four corners of the document/paper visible in this image.
-Return ONLY a JSON object with this exact format, no explanation:
+      const prompt = `Detect the four corners of the document or paper visible in this image.
+Return ONLY a JSON object in this exact format, no explanation, no markdown:
 {
   "corners": [
     {"x": <0-1 normalized>, "y": <0-1 normalized>, "label": "top-left"},
@@ -433,19 +435,10 @@ Return ONLY a JSON object with this exact format, no explanation:
     {"x": <0-1 normalized>, "y": <0-1 normalized>, "label": "bottom-left"}
   ]
 }
-x and y are normalized coordinates (0 to 1) relative to image width and height.
-Order: top-left, top-right, bottom-right, bottom-left.`,
-                },
-              ],
-            },
-          ],
-        }),
-      });
+x and y are normalized coordinates from 0 to 1 relative to image width and height.
+Order must be: top-left, top-right, bottom-right, bottom-left.`;
 
-      const data = await response.json();
-      if (data.error) throw new Error(data.error.message);
-
-      const raw = data.content.map((b) => b.text || "").join("");
+      const raw = await callGemini(base64, mimeType, prompt);
       const clean = raw.replace(/```json|```/g, "").trim();
       const parsed = JSON.parse(clean);
       const pts = parsed.corners.map((c) => ({
@@ -461,70 +454,41 @@ Order: top-left, top-right, bottom-right, bottom-left.`,
     }
   };
 
-  // ─── Claude Vision: extract text ──────────────────────────────
+  // ─── Gemini: extract text ──────────────────────────────────────
   const extractText = async () => {
     const src = warpedImage || image?.dataUrl;
     if (!src) return;
 
-    if (!API_KEY) {
-      setStatus({ type: "error", msg: "API key not found. Make sure VITE_ANTHROPIC_API_KEY is set in your .env file." });
+    if (!GEMINI_API_KEY) {
+      setStatus({ type: "error", msg: "API key not found. Make sure VITE_GEMINI_API_KEY is set in your .env file." });
       return;
     }
 
-    setStatus({ type: "processing", msg: "Extracting text with Claude Vision…" });
+    setStatus({ type: "processing", msg: "Extracting text with Gemini Vision…" });
     setActiveTab("text");
 
     try {
       const base64 = src.split(",")[1];
-      const mediaType = src.split(";")[0].split(":")[1];
+      const mimeType = src.split(";")[0].split(":")[1];
 
-      const response = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-api-key": API_KEY,
-          "anthropic-version": "2023-06-01",
-          "anthropic-dangerous-direct-browser-access": "true",
-        },
-        body: JSON.stringify({
-          model: "claude-sonnet-4-20250514",
-          max_tokens: 4000,
-          messages: [
-            {
-              role: "user",
-              content: [
-                {
-                  type: "image",
-                  source: { type: "base64", media_type: mediaType, data: base64 },
-                },
-                {
-                  type: "text",
-                  text: "Extract all the text from this document image. Preserve the original formatting and structure as much as possible. Return only the extracted text, nothing else.",
-                },
-              ],
-            },
-          ],
-        }),
-      });
+      const prompt = "Extract all the text from this document image. Preserve the original formatting and structure as much as possible. Return only the extracted text, nothing else.";
 
-      const data = await response.json();
-      if (data.error) throw new Error(data.error.message);
-      const text = data.content.map((b) => b.text || "").join("").trim();
-      setExtractedText(text);
+      const text = await callGemini(base64, mimeType, prompt);
+      setExtractedText(text.trim());
       setStatus({ type: "success", msg: "Text extracted successfully." });
     } catch (err) {
       setStatus({ type: "error", msg: `Text extraction failed: ${err.message}` });
     }
   };
 
-  // ─── Perspective warp (homography, pure canvas) ───────────────
+  // ─── Perspective warp ─────────────────────────────────────────
   const warpDocument = useCallback(() => {
     if (!image || !corners || corners.length !== 4) return;
 
     const img = new Image();
     img.onload = () => {
-      const outW = 794;  // A4 width at 96dpi
-      const outH = 1123; // A4 height at 96dpi
+      const outW = 794;
+      const outH = 1123;
       const canvas = canvasRef.current;
       canvas.width = outW;
       canvas.height = outH;
@@ -592,7 +556,6 @@ Order: top-left, top-right, bottom-right, bottom-left.`,
     const scaleY = canvas.height / image.height;
     const pts = corners.map((c) => ({ x: c.x * scaleX, y: c.y * scaleY }));
 
-    // Polygon
     ctx.beginPath();
     ctx.moveTo(pts[0].x, pts[0].y);
     pts.forEach((p) => ctx.lineTo(p.x, p.y));
@@ -603,7 +566,6 @@ Order: top-left, top-right, bottom-right, bottom-left.`,
     ctx.fillStyle = "rgba(26,26,24,0.06)";
     ctx.fill();
 
-    // Handles
     pts.forEach((p, i) => {
       ctx.beginPath();
       ctx.arc(p.x, p.y, 9, 0, Math.PI * 2);
@@ -677,7 +639,6 @@ Order: top-left, top-right, bottom-right, bottom-left.`,
   const hasWarped = !!warpedImage;
   const hasText = !!extractedText;
 
-  // ─── Render ────────────────────────────────────────────────────
   return (
     <div style={styles.page}>
       <style>{`
@@ -690,7 +651,6 @@ Order: top-left, top-right, bottom-right, bottom-left.`,
         .overlay-canvas { cursor: crosshair; position: absolute; inset: 0; width: 100%; height: 100%; }
       `}</style>
 
-      {/* Header */}
       <div style={styles.header}>
         <h1 style={styles.title}>Document Scanner</h1>
         <p style={styles.subtitle}>
@@ -773,7 +733,6 @@ Order: top-left, top-right, bottom-right, bottom-left.`,
         {/* ── Workspace ── */}
         {hasImage && (
           <>
-            {/* Tab bar */}
             <div style={styles.tabRow}>
               <button
                 style={{ ...styles.tab, ...(activeTab === "original" ? styles.tabActive : {}) }}
@@ -807,14 +766,12 @@ Order: top-left, top-right, bottom-right, bottom-left.`,
               )}
             </div>
 
-            {/* Original tab */}
             {activeTab === "original" && (
               <div style={{ ...styles.previewCard, marginTop: "16px" }}>
                 <img src={image.dataUrl} alt="Original" style={styles.previewImg} />
               </div>
             )}
 
-            {/* Corners tab */}
             {activeTab === "corners" && hasCorners && (
               <div style={{ ...styles.previewCard, marginTop: "16px" }}>
                 <div style={styles.canvasWrapper}>
@@ -847,14 +804,12 @@ Order: top-left, top-right, bottom-right, bottom-left.`,
               </div>
             )}
 
-            {/* Warped tab */}
             {activeTab === "warped" && hasWarped && (
               <div style={{ ...styles.previewCard, marginTop: "16px" }}>
                 <img src={warpedImage} alt="Warped document" style={styles.previewImg} />
               </div>
             )}
 
-            {/* Text tab */}
             {activeTab === "text" && (
               <div style={{ marginTop: "16px" }}>
                 {hasText ? (
@@ -867,7 +822,6 @@ Order: top-left, top-right, bottom-right, bottom-left.`,
               </div>
             )}
 
-            {/* Corner coordinate display */}
             {hasCorners && activeTab === "corners" && (
               <div style={styles.cornersInfo}>
                 <div style={styles.cornersTitle}>Detected Corner Coordinates</div>
@@ -888,7 +842,6 @@ Order: top-left, top-right, bottom-right, bottom-left.`,
               </div>
             )}
 
-            {/* Action buttons */}
             <div style={styles.actionBar}>
               {!hasCorners && (
                 <button
@@ -980,26 +933,16 @@ Order: top-left, top-right, bottom-right, bottom-left.`,
           </>
         )}
 
-        {/* Hidden canvas for perspective warp output */}
         <canvas ref={canvasRef} style={{ display: "none" }} />
       </div>
 
       {/* ── Camera modal ── */}
       {showCamera && (
         <div style={styles.cameraModal}>
-          <video
-            ref={videoRef}
-            autoPlay
-            playsInline
-            style={styles.cameraVideo}
-          />
+          <video ref={videoRef} autoPlay playsInline style={styles.cameraVideo} />
           <div style={styles.cameraBtnRow}>
-            <button style={styles.snapBtn} onClick={snapPhoto}>
-              📸 Capture
-            </button>
-            <button style={styles.closeCamBtn} onClick={stopCamera}>
-              Cancel
-            </button>
+            <button style={styles.snapBtn} onClick={snapPhoto}>📸 Capture</button>
+            <button style={styles.closeCamBtn} onClick={stopCamera}>Cancel</button>
           </div>
         </div>
       )}
